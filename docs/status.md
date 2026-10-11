@@ -34,9 +34,6 @@ Report with every finding: `analysis/security-review.md` in the project files.
   every update must be signed.
 
 ## Check early next session
-- `release.yml` now has a `check` job so pushes that don't raise the version
-  don't ask for approval; confirm the next docs-only push shows the release
-  job skipped.
 - `tests/run.py --compat` in the Release workflow: confirm it ran in 0.11.0.
 - Small fix pending: when `gh api` is refused, `tools/doctor.sh` prints GitHub's
   JSON error into its status line; send gh's errors to /dev/null and print `?`.
