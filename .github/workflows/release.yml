@@ -20,7 +20,34 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Runs on every push without the signing environment, so only a new version
+  # asks the owner to approve.
+  check:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      new: ${{ steps.version.outputs.new }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Is this version already released?
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          if gh release view "v$version" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "v$version is already released; nothing to do."
+            echo "new=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "new=true" >> "$GITHUB_OUTPUT"
+          fi
+
   release:
+    needs: check
+    if: needs.check.outputs.new == 'true'
     # Pinned: the Linux server is built here and needs a glibc no newer than
     # the rented server's (Ubuntu 24.04).
     runs-on: ubuntu-24.04
