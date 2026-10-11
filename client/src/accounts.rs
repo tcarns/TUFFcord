@@ -24,7 +24,8 @@ pub struct AccountUi {
     /// Typed on the sign-in screen; never saved.
     pub password: String,
     pub confirm: String,
-    /// The group password, for creating an account.
+    /// The invite code (or, on servers before 0.12, the group password) for
+    /// creating an account.
     pub invite: String,
     /// A hint (not an error) on the sign-in screen.
     pub notice: Option<String>,
@@ -555,8 +556,8 @@ impl App {
                 );
                 submit |= field(
                     ui,
-                    "Group password or invite",
-                    "Ask whoever runs the server",
+                    "Invite code",
+                    "Ask whoever runs the server for one",
                     &mut self.acct.invite,
                     true,
                     300,
@@ -592,11 +593,9 @@ impl App {
         } else if self.acct.mode == LoginMode::SignIn {
             ui.add_space(8.0);
             ui.label(
-                RichText::new(
-                    "New here? Choose \"Create account\" and use the group password or an invite.",
-                )
-                .size(12.5)
-                .color(pal().faint),
+                RichText::new("New here? Choose \"Create account\" and paste your invite code.")
+                    .size(12.5)
+                    .color(pal().faint),
             );
         }
     }

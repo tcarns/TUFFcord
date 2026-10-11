@@ -39,8 +39,9 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let server = arg(&args, "--server").unwrap_or_else(|| "ws://127.0.0.1:3000/ws".into());
     let name = arg(&args, "--name").unwrap_or_else(|| "Bot".into());
-    // The group password. The bot creates an account (or signs in to it, if the
-    // name is taken) with --account-password; --legacy signs in the old way.
+    // An invite (the group password on servers before 0.12). The bot creates an
+    // account with it (or signs in, if the name is taken) with --account-password;
+    // without one it just signs in. --legacy signs in the old way.
     let password = arg(&args, "--password").unwrap_or_default();
     let account_password =
         arg(&args, "--account-password").unwrap_or_else(|| format!("bot-{name}-password"));
@@ -78,6 +79,10 @@ fn main() {
         SignIn::Group {
             password: password.clone(),
         }
+    } else if password.is_empty() {
+        SignIn::Login {
+            password: account_password.clone(),
+        }
     } else {
         SignIn::Register {
             group_password: password.clone(),
@@ -85,7 +90,7 @@ fn main() {
         }
     };
     net.connect(server.clone(), name.clone(), first);
-    let mut tried_login = legacy;
+    let mut tried_login = legacy || password.is_empty();
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut my_id = 0;
     let mut endpoint: Option<tuffcord::files::Endpoint> = None;

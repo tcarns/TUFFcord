@@ -44,7 +44,7 @@ time; hosting at home must keep working.
   voice relay, console commands; `history.rs` recent messages, archive of older
   ones (`data/history/*.jsonl`), `loadOlder`, deleting messages; `storage.rs`
   file storage limit, admins' storage warning; `auth.rs` sign-in; `admin.rs` admin
-  actions (owner rule); `limits.rs` wrong-password counts, hash and connection caps; `invites.rs` one-time invites; `sessions.rs` signed-in devices, new-address notices; `adminlog.rs` admin log (`admin_log!`); `channels.rs` admins adding, renaming, deleting, reordering channels; `trash.rs` deleted text channels kept 30 days (`restore`); `accounts.rs` storage (argon2); `files.rs` HTTP endpoints on the same
+  actions (owner rule); `limits.rs` wrong-password counts, hash and connection caps; `sessions.rs` signed-in devices, new-address notices; `adminlog.rs` admin log (`admin_log!`); `channels.rs` admins adding, renaming, deleting, reordering channels; `trash.rs` deleted text channels kept 30 days (`restore`); `console.rs` server window commands, and `TUFFcord-server <command>` to the running Linux server (`data/console.sock`); `invites.rs` console-only invites (24 h, 10 open); `accounts.rs` storage (argon2); `files.rs` HTTP endpoints on the same
   port (POST/PUT/GET /files, Range, chunked bodies); `selfupdate.rs` watcher +
   updater; `config.rs` settings file and its upgrades; `log.rs`.
 - `client/src/` egui 0.32 (glow). The `App` struct is split across files,
@@ -96,7 +96,7 @@ time; hosting at home must keep working.
   `TUFFcord*.exe`, all listed in `SHA256SUMS.txt`; `TUFFcord-server-linux-x86_64`
   is what Linux servers update from (built on Ubuntu 24.04).
 - Protocol: only add optional fields/messages; old clients skip unknown types.
-- `backroom-server.toml` / `TUFFcord-server.toml` hold the group password:
+- `backroom-server.toml` / `TUFFcord-server.toml` (older ones hold a group password):
   never commit (both in .gitignore).
 
 ## Commands

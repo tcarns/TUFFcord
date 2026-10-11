@@ -10,7 +10,7 @@ Environment:
   TUFF_BIN  folder with TUFFcord-server and tuffcord-bot (default target/debug)
   TUFF_OUT  folder for test output (default target/tests)
 """
-import asyncio, atexit, http.client as httpc, json, os, shutil, signal, socket, subprocess, sys, time
+import asyncio, atexit, http.client as httpc, json, os, re, shutil, signal, socket, subprocess, sys, time
 
 import websockets
 
@@ -115,6 +115,24 @@ class Server:
     def log(self):
         return open(self.log_path).read()
 
+    def invite(self):
+        """A fresh one-time invite from the server console. Servers before 0.12
+        have no "invite" command: their group password does the same job."""
+        if getattr(self, "old", False):
+            return self.group
+        before = self.log().count("Invite code: ")
+        self.console("invite")
+        deadline = time.time() + 3
+        while time.time() < deadline:
+            codes = re.findall(r"Invite code: (\w+)", self.log())
+            if len(codes) > before:
+                return codes[-1]
+            if 'Unknown command "invite"' in self.log():
+                self.old = True
+                return self.group
+            time.sleep(0.02)
+        raise RuntimeError("the server made no invite")
+
     def http(self, method, path, key=None, body=b"", headers=None, chunked=False):
         c = httpc.HTTPConnection("127.0.0.1", self.port, timeout=30)
         h = dict(headers or {})
@@ -152,9 +170,13 @@ class Server:
         return await Conn.open(url or self.url, ip)
 
     async def register(self, name, pw="password1", invite=None, ip=None):
+        """Create an account, with a console invite unless one is given. An
+        invite a refused attempt didn't use is kept for the next one."""
+        code = invite if invite is not None else (getattr(self, "spare", None) or self.invite())
         c = await self.connect(ip)
-        r = await c.hello(name, self.group if invite is None else invite,
-                          {"kind": "register", "newPassword": pw})
+        r = await c.hello(name, code, {"kind": "register", "newPassword": pw})
+        if invite is None:
+            self.spare = None if r and r.get("type") == "welcome" else code
         return c, r
 
     async def login(self, name, pw="password1", ip=None):
@@ -228,7 +250,7 @@ class Conn:
         await self.ws.close()
 
 
-def bot(server_url, name, *args, bin_dir=None, password="g", seconds=3, env=None):
+def bot(server_url, name, *args, bin_dir=None, password="", seconds=3, env=None):
     """Run tuffcord-bot to completion and return its JSON report."""
     out = subprocess.run([binary("tuffcord-bot", bin_dir), "--server", server_url, "--password", password,
                           "--name", name, "--seconds", str(seconds), *args],

@@ -46,8 +46,8 @@ def cpu_percent(pid, seconds, tid=None):
     return 100 * (cpu_seconds(pid, tid) - a) / (time.time() - t)
 
 
-def bots(url, names, seconds):
-    return [spawn([os.path.join(REL, "tuffcord-bot"), "--server", url, "--password", "g", "--name", n,
+def bots(s, names, seconds):
+    return [spawn([os.path.join(REL, "tuffcord-bot"), "--server", s.url, "--password", s.invite(), "--name", n,
                    "--channel", "Lounge", "--tone", str(300 + 60 * i), "--seconds", str(seconds)],
                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             for i, n in enumerate(names)]
@@ -57,7 +57,7 @@ async def server_budget(r):
     s = Server("server", bin_dir=REL, LOG_LEVEL="info")
     time.sleep(1)
     r["serverIdleMb"] = kb(s.p.pid, "VmRSS") / 1024
-    talkers = bots(s.url, [f"S{i}" for i in range(8)], 20)
+    talkers = bots(s, [f"S{i}" for i in range(8)], 20)
     time.sleep(8)
     r["serverCallCpu"] = cpu_percent(s.p.pid, 8)
     r["serverCallMb"] = kb(s.p.pid, "VmRSS") / 1024
@@ -131,7 +131,7 @@ async def app_budget(r):
     time.sleep(1)
     joined = await in_voice(s, "Me")
     check(joined, "the app joined the voice channel")
-    talkers = bots(s.url, ["T1", "T2", "T3"], 20)
+    talkers = bots(s, ["T1", "T2", "T3"], 20)
     time.sleep(6)
     r["appCallCpu"] = cpu_percent(app.pid, 10, app.pid)
     r["appCallTotalCpu"] = cpu_percent(app.pid, 2)

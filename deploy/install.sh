@@ -48,7 +48,7 @@ if [ ! -x "$dir/TUFFcord-server" ]; then
 fi
 "$dir/TUFFcord-server" --version
 chown -R tuffcord:tuffcord "$dir"
-# The settings file holds the group password; accounts and files are private too.
+# Settings, accounts and files are private to the server's user.
 chmod 750 "$dir"
 [ -f "$dir/TUFFcord-server.toml" ] && chmod 600 "$dir/TUFFcord-server.toml"
 [ -d "$dir/data" ] && chmod 700 "$dir/data"
@@ -94,6 +94,18 @@ $domain {
 }
 CADDY
 
+# "tuffcord invite" (and the other console commands) for the running server.
+cat > /usr/local/bin/tuffcord <<'CMD'
+#!/bin/sh
+if [ $# -eq 0 ]; then
+  echo "Usage: tuffcord <command>   (tuffcord help lists them)"
+  exit 1
+fi
+exec sudo -u tuffcord /opt/tuffcord/TUFFcord-server "$@"
+CMD
+sed -i "s|/opt/tuffcord|$dir|" /usr/local/bin/tuffcord
+chmod 755 /usr/local/bin/tuffcord
+
 systemctl daemon-reload
 systemctl enable --now tuffcord
 systemctl restart tuffcord
@@ -105,3 +117,4 @@ systemctl --no-pager --lines=0 status tuffcord | head -3
 echo "Address for the app:  $domain"
 echo "Settings:             $dir/TUFFcord-server.toml (restart after editing: systemctl restart tuffcord)"
 echo "Log:                  journalctl -u tuffcord -f"
+echo "Invite someone:       tuffcord invite   (other commands: tuffcord help)"

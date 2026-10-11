@@ -1,5 +1,6 @@
 //! Settings > Account, the security parts: your signed-in devices (sign one
-//! out, or all the others), and for admins one-time invites and the admin log.
+//! out, or all the others), and for admins the admin log. (Invites are made in
+//! the server console.)
 //! Each needs a server that says it supports it (0.11+).
 
 use crate::accounts::when;
@@ -10,12 +11,10 @@ use proto::{AdminLogEntry, ClientMsg, ServerMsg, SessionInfo};
 
 #[derive(Default)]
 pub(crate) struct Security {
-    invites: bool,
     sessions: bool,
     admin_log: bool,
     devices: Option<Vec<SessionInfo>>,
     asked_devices: bool,
-    invite: Option<(String, u64)>,
     log: Option<Vec<AdminLogEntry>>,
 }
 
@@ -23,7 +22,6 @@ impl Security {
     pub fn new(features: &[String]) -> Security {
         let has = |f: &str| features.iter().any(|x| x == f);
         Security {
-            invites: has(proto::FEATURE_INVITES),
             sessions: has(proto::FEATURE_SESSIONS),
             admin_log: has(proto::FEATURE_ADMIN_LOG),
             ..Default::default()
@@ -40,13 +38,12 @@ fn faint(ui: &mut egui::Ui, t: &str) {
 }
 
 impl App {
-    /// Invite, Sessions and AdminLog answers. True if `msg` was one.
+    /// Sessions and AdminLog answers. True if `msg` was one.
     pub(crate) fn on_security_msg(&mut self, msg: ServerMsg) -> bool {
         let Some(sec) = self.session.as_mut().map(|s| &mut s.security) else {
             return false;
         };
         match msg {
-            ServerMsg::Invite { code, expires } => sec.invite = Some((code, expires)),
             ServerMsg::Sessions { list } => sec.devices = Some(list),
             ServerMsg::AdminLog { entries } => sec.log = Some(entries),
             _ => return false,
@@ -103,33 +100,6 @@ impl App {
             }
             ui.add_space(14.0);
         }
-        if admin && sec.invites {
-            heading(ui, "Invites");
-            faint(
-                ui,
-                "An invite creates one account, in place of the group password, and works for a week.",
-            );
-            ui.add_space(4.0);
-            if ui.button("Make an invite").clicked() {
-                send.push(ClientMsg::CreateInvite);
-            }
-            if let Some((code, expires)) = &sec.invite {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(code).monospace().size(15.0).color(pal().text));
-                    if ui.small_button("Copy").clicked() {
-                        ui.ctx().copy_text(code.clone());
-                    }
-                });
-                let days = expires
-                    .saturating_sub(proto_now())
-                    .div_ceil(24 * 3600 * 1000);
-                faint(
-                    ui,
-                    &format!("Send it to one person. It works once, for {days} more days."),
-                );
-            }
-            ui.add_space(14.0);
-        }
         if admin && sec.admin_log {
             heading(ui, "Admin log");
             if sec.log.is_none() {
@@ -161,11 +131,4 @@ impl App {
             self.net.send(m);
         }
     }
-}
-
-fn proto_now() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
 }

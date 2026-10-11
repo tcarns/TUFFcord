@@ -315,9 +315,10 @@ impl App {
                     sess.storage_hidden = false;
                 }
             }
-            m @ (ServerMsg::Invite { .. }
-            | ServerMsg::Sessions { .. }
-            | ServerMsg::AdminLog { .. }) => {
+            // Servers before 0.12 made invites for admins in the app; now only
+            // the server console does.
+            ServerMsg::Invite { .. } => {}
+            m @ (ServerMsg::Sessions { .. } | ServerMsg::AdminLog { .. }) => {
                 self.on_security_msg(m);
             }
             m @ (ServerMsg::AccountUpdated { .. }

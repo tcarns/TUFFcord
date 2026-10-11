@@ -9,7 +9,7 @@ use crate::{leave_voice, limits, now_ms, Shared, State};
 use proto::{Account, AccountSummary, Auth, Member, ServerMsg, FEATURE_ACCOUNTS};
 use proto::{
     FEATURE_ADMIN_LOG, FEATURE_ATTACHMENTS, FEATURE_CHANNELS, FEATURE_CHANNEL_EDIT, FEATURE_FILES,
-    FEATURE_INVITES, FEATURE_OLDER_MESSAGES, FEATURE_SESSIONS, PROTOCOL_VERSION,
+    FEATURE_OLDER_MESSAGES, FEATURE_SESSIONS, PROTOCOL_VERSION,
 };
 use std::time::{Duration, Instant};
 use tokio_tungstenite::tungstenite::Message;
@@ -201,7 +201,6 @@ impl State {
                 FEATURE_CHANNELS.to_string(),
                 FEATURE_CHANNEL_EDIT.to_string(),
                 FEATURE_OLDER_MESSAGES.to_string(),
-                FEATURE_INVITES.to_string(),
                 FEATURE_SESSIONS.to_string(),
                 FEATURE_ADMIN_LOG.to_string(),
             ],
@@ -235,14 +234,6 @@ async fn checked_verify(
         shared.lock().unwrap().failures.forgive(ip, Some(name));
     }
     ok
-}
-
-fn ct_eq(a: &[u8], b: &[u8]) -> bool {
-    let mut diff = (a.len() != b.len()) as u8;
-    for i in 0..a.len().max(b.len()) {
-        diff |= a.get(i).copied().unwrap_or(0) ^ b.get(i).copied().unwrap_or(0);
-    }
-    diff == 0
 }
 
 // ---------------------------------------------------------------- signing in
@@ -399,29 +390,18 @@ async fn register(
     invite: String,
     new_password: String,
 ) {
-    let (name, by_invite) = {
+    let name = {
         let mut st = shared.lock().unwrap();
-        let by_invite = crate::invites::valid(&mut st, &invite);
-        if !by_invite && !st.cfg.allow_signup {
-            st.refuse(
-                conn,
-                "signup_closed",
-                "This server isn't taking new accounts. Ask whoever runs it.",
-                false,
-            );
-            return;
-        }
-        let group = st.cfg.password.clone();
-        if !by_invite && !group.is_empty() && !ct_eq(invite.as_bytes(), group.as_bytes()) {
+        if !crate::invites::valid(&mut st, &invite) {
             warn!(
                 "auth",
-                "Wrong group password or invite from {ip} while creating an account"
+                "Wrong or used invite from {ip} while creating an account"
             );
             st.failures.record(ip, None);
             st.refuse(
                 conn,
                 "bad_password",
-                "That group password or invite isn't right. Ask whoever runs the server for one.",
+                "That invite isn't right, was already used, or is over 24 hours old. Ask whoever runs the server for a new one.",
                 true,
             );
             return;
@@ -448,7 +428,7 @@ async fn register(
                 false,
             );
         }
-        (name, by_invite)
+        name
     };
     let Some(hash) = limits::hash(new_password).await else {
         return;
@@ -463,28 +443,22 @@ async fn register(
             false,
         );
     }
-    let mut how = String::new();
-    if by_invite {
-        let Some(by) = crate::invites::redeem(&mut st, &invite) else {
-            return st.refuse(
-                conn,
-                "bad_password",
-                "That invite was just used. Ask for another.",
-                false,
-            );
-        };
-        let by = st
-            .accounts
-            .get(by)
-            .map(|a| a.name.clone())
-            .unwrap_or_default();
-        how = format!(" with an invite from {by}");
+    if !crate::invites::redeem(&mut st, &invite) {
+        return st.refuse(
+            conn,
+            "bad_password",
+            "That invite was just used. Ask for another.",
+            false,
+        );
     }
     let now = now_ms();
     let id = st.accounts.create(&name, hash, ip, now);
     let (token, token_hash) = st.accounts.issue_token(id, now, ip).unwrap();
     st.save_accounts();
-    info!("auth", "{name} created an account{how} (from {ip})");
+    info!(
+        "auth",
+        "{name} created an account with an invite (from {ip})"
+    );
     st.broadcast_members();
     if st.accounts.admin_count() == 0 && st.accounts.all().len() == 1 {
         warn!(
@@ -501,7 +475,8 @@ async fn register(
     );
 }
 
-/// Apps from before accounts send just a name and the group password.
+/// Apps from before accounts send just a name and a password. Their account's
+/// own password still works; anything else is told how to get in now.
 async fn legacy(
     shared: &Shared,
     conn: u32,
@@ -510,22 +485,14 @@ async fn legacy(
     password: String,
     accounts_aware: bool,
 ) {
-    let (group_ok, found) = {
-        let st = shared.lock().unwrap();
-        let group = &st.cfg.password;
-        let group_ok = group.is_empty() || ct_eq(password.as_bytes(), group.as_bytes());
-        (
-            group_ok,
-            st.accounts
-                .by_name(&name)
-                .map(|a| (a.id, a.password_hash.clone(), a.banned)),
-        )
-    };
-    // Someone with an account using an older app: their own password works.
+    let found = shared
+        .lock()
+        .unwrap()
+        .accounts
+        .by_name(&name)
+        .map(|a| (a.id, a.password_hash.clone(), a.banned));
     if let Some((id, hash, banned)) = &found {
-        if !group_ok
-            && checked_verify(shared, ip, &name, password.clone(), Some(hash.clone())).await
-        {
+        if checked_verify(shared, ip, &name, password, Some(hash.clone())).await {
             let mut st = shared.lock().unwrap();
             if *banned {
                 return st.refuse(
@@ -538,32 +505,17 @@ async fn legacy(
             return st.sign_in(conn, *id, None, None, " (older app)");
         }
     }
-    let mut st = shared.lock().unwrap();
-    if group_ok {
-        debug!(
-            "auth",
-            "{ip} signed in the old way (name \"{}\"); asked to use an account",
-            crate::clean(&name, 40)
-        );
-        if accounts_aware {
-            st.refuse(conn, "account_required", "This server now has accounts. Create yours below with the group password, or sign in if you already have one.", false);
-        } else if found.is_some() {
-            // Older apps treat "bad_password" as final and stop retrying.
-            st.refuse(conn, "bad_password", "This server now has accounts, and that name has one. Get the new TUFFcord with the link below, then sign in.", false);
-        } else {
-            // The group password alone doesn't let anyone read the chat.
-            st.refuse(conn, "bad_password", "This server now has accounts. Get the new TUFFcord with the link below, then create your account.", false);
-        }
+    let st = shared.lock().unwrap();
+    debug!(
+        "auth",
+        "{ip} signed in the old way (name \"{}\"); asked to use an account",
+        crate::clean(&name, 40)
+    );
+    if accounts_aware {
+        st.refuse(conn, "account_required", "This server needs an account. Sign in, or choose Create account and paste the invite code you were given.", false);
     } else {
-        warn!(
-            "auth",
-            "Wrong password from {ip} (name \"{}\")",
-            crate::clean(&name, 40)
-        );
-        if found.is_none() {
-            st.failures.record(ip, None);
-        }
-        st.refuse(conn, "bad_password", "That password is not right.", true);
+        // Older apps treat "bad_password" as final and stop retrying.
+        st.refuse(conn, "bad_password", "This server needs an account now. Get the new TUFFcord with the link below, then sign in or create one with an invite.", false);
     }
 }
 
@@ -727,7 +679,7 @@ pub fn sign_out(st: &mut State, conn: u32) {
 /// Startup hint for the host.
 pub fn startup_notes(store: &Store) {
     if store.all().is_empty() {
-        info!("auth", "No accounts yet. People create one in the app with the group password. Then type \"admin <name>\" here to make yourself an admin.");
+        info!("auth", "No accounts yet. Type \"invite\" here for an invite code, create your account with it in the app, then type \"admin <your name>\" to make yourself an admin.");
     } else if store.admin_count() == 0 {
         warn!(
             "auth",

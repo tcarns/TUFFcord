@@ -9,8 +9,11 @@ Settled choices and why. Add one when a choice would otherwise be revisited.
   WebSocket (Opus frames), so no router or NAT setup is needed and a Cloudflare
   tunnel or reverse proxy carries everything. Files go over plain HTTP on the
   same port (since 0.7) so big transfers never delay voice.
-- **Accounts with a group password to sign up (0.6).** Group password only
-  creates accounts; sign-in keys are stored hashed; argon2 for passwords, run off
+- **Accounts, created only with console invites (0.12).** 0.6 to 0.11 used a
+  group password to create accounts; 0.12 removed it: a one-time invite made in
+  the server window (or `tuffcord invite` on Linux, through `data/console.sock`,
+  mode 600) creates one account, lasts 24 hours, at most 10 waiting. Admins
+  can't make invites in the app, so a stolen admin account can't add people; sign-in keys are stored hashed; argon2 for passwords, run off
   the main thread so voice isn't held up.
 - **Self-updating app and server.** The app swaps its own exe and restarts with
   `BACKROOM_RESUME`; the Windows server runs under a watcher process that restarts

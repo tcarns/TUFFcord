@@ -16,22 +16,20 @@ This version doesn't work with the old browser version. Everyone needs the app.
 ## Hosting the server
 
 1. Put `TUFFcord-server.exe` in a folder of its own. It saves its settings, chat history and logs next to itself.
-2. Double-click it. The first time, it creates `TUFFcord-server.toml` with a random group password and shows that password in the window. People need it once, to create their account. To change it, edit that file and restart the server.
+2. Double-click it. The first time, it creates `TUFFcord-server.toml` with the default settings.
 3. Keep the window open while people are using TUFFcord. If Windows asks whether to allow network access, allowing it on private networks is fine. Task Manager shows two `TUFFcord-server.exe` entries: a tiny watcher and the server itself (see Updates). That's normal.
 4. To let friends connect from outside your home, start a Cloudflare tunnel in PowerShell, the same as before:
    ```powershell
    cloudflared tunnel --url http://localhost:3000
    ```
-5. Send your friends the `….trycloudflare.com` address and the group password.
-6. Create your own account in the app (see Joining), then type `admin <your name>` in the server window to make yourself an admin.
+5. Type `invite` in the server window for each friend. It prints a one-time invite code that creates one account and works for 24 hours (at most 10 waiting at once). Send each friend the `….trycloudflare.com` address and their own code.
+6. Make one for yourself too, create your account in the app (see Joining), then type `admin <your name>` in the server window to make yourself an admin.
 
 ## Joining
 
 1. Run `TUFFcord.exe`. The first time, Windows may say "Windows protected your PC", because the app isn't signed. Click **More info**, then **Run anyway**.
 2. **Server address:** the `….trycloudflare.com` address (with or without `https://`). If you're on the computer running the server, `localhost:3000` also works.
-3. The first time, choose **Create account**: pick a name and a password of your own, and enter the group password. After that, use **Sign in** with your name and password. With "Keep me signed in" checked, TUFFcord signs you in by itself next time.
-
-If you used the app before accounts (0.5.0 or earlier), the app opens on **Create account** with your name and the group password already filled in. Just pick a password.
+3. The first time, choose **Create account**: pick a name and a password of your own, and paste the invite code you were sent. After that, use **Sign in** with your name and password. With "Keep me signed in" checked, TUFFcord signs you in by itself next time.
 
 Headphones are recommended. There's no echo cancellation yet, so speakers can feed other people's voices back into your mic.
 
@@ -69,7 +67,7 @@ The app's settings are saved in `%APPDATA%\TUFFcord\settings.json`.
 
 ## Accounts
 
-Everyone has their own account: a name nobody else can take, and their own password. The group password is only needed to create an account.
+Everyone has their own account: a name nobody else can take, and their own password. New accounts need a one-time invite, made only in the server window (`invite`; on a Linux server, `tuffcord invite`). Each invite creates one account and works for 24 hours, and at most 10 can be waiting at once. Since 0.12 there is no group password.
 
 - **Your account** (Settings, at the bottom): rename yourself, change your password, or sign out. Changing your password signs you out on your other computers.
 - **Keep me signed in** saves a sign-in key from the server in `settings.json`, not your password. Signing out deletes the key on the server too, so a copied `settings.json` stops working. Keys you don't use for 180 days expire.
@@ -84,7 +82,7 @@ Everyone has their own account: a name nobody else can take, and their own passw
 
 The same things work from the server window: `users`, `admin <name>`, `unadmin <name>`, `kick <name>`, `ban <name>`, `unban <name>`, `resetpw <name>` and `deluser <name>`. Deleting an account frees its name. Someone who forgets their password: `resetpw <name>`.
 
-Accounts are saved in `data\accounts.json`. Passwords are stored only as Argon2 hashes, and sign-in keys only as SHA-256 hashes, so the file can't be used to sign in as anyone. Still, keep it private and include it in backups. To stop new accounts once everyone has one, set `allow_signup = false`.
+Accounts are saved in `data\accounts.json`. Passwords are stored only as Argon2 hashes, and sign-in keys only as SHA-256 hashes, so the file can't be used to sign in as anyone. Still, keep it private and include it in backups. Invite codes are stored hashed too. To stop new accounts, just don't make invites.
 
 Ten wrong passwords from one address in ten minutes make it wait. Wrong passwords are logged.
 
@@ -94,8 +92,6 @@ Edit `TUFFcord-server.toml` next to the server, then restart it:
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| `password` | random | Group password, needed to create an account. `""` lets anyone with the address create one. |
-| `allow_signup` | `true` | `false` stops new accounts being created |
 | `port` | `3000` | Port to listen on |
 | `app_name` | `TUFFcord` | Name shown in the app. A settings file from before the rename that still said `Backroom` is switched to `TUFFcord` once. |
 | `text_channels` | `["general", "links", "memes"]` | Text channels |
@@ -115,7 +111,7 @@ Files are saved in `data\attachments`. They're deleted automatically when their 
 
 Files travel over plain HTTP on the server's port, separately from voice, so a big upload or download never makes anyone's voice stutter. The Cloudflare tunnel carries both, with nothing to set up.
 
-**Mixing versions:** 0.7 apps and servers work with 0.8 ones. A message an admin deletes disappears from 0.7 apps the next time they connect, rather than straight away, and only 0.8 apps show the trash can. With a 0.7.0 server, 0.6.0 apps still work but only show images (other files say they aren't available), and a 0.7.0 app on a 0.6.0 server can only send images. A server with accounts (0.6.0 and later) needs apps from 0.6.0 on. Older apps are told to close, reopen and click **Update now**. Apps from 0.6.0 still work with older servers, signing in with the group password. Between 0.2.0 and 0.5.0, any app works with any server. A 0.3.0 app on a 0.2.0 server can't send images (the + button is greyed out), and a 0.2.0 app on a 0.3.0 server shows messages without their images.
+**Mixing versions:** 0.7 apps and servers work with 0.8 ones. A message an admin deletes disappears from 0.7 apps the next time they connect, rather than straight away, and only 0.8 apps show the trash can. With a 0.7.0 server, 0.6.0 apps still work but only show images (other files say they aren't available), and a 0.7.0 app on a 0.6.0 server can only send images. A server with accounts (0.6.0 and later) needs apps from 0.6.0 on. Older apps are told to close, reopen and click **Update now**. Apps from 0.6.0 still work with older servers, signing in with the group password. On a 0.12 server, 0.6 to 0.11 apps create an account by typing the invite code into their group password box. Between 0.2.0 and 0.5.0, any app works with any server. A 0.3.0 app on a 0.2.0 server can't send images (the + button is greyed out), and a 0.2.0 app on a 0.3.0 server shows messages without their images.
 
 **Keeping your old chat history:** the history format is the same as the browser version's. Copy the old `data\messages.json` into the `data` folder next to `TUFFcord-server.exe` before starting it.
 

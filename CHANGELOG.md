@@ -2,6 +2,16 @@
 
 Each version's section becomes the notes on its GitHub release, which the app shows when an update is available.
 
+## 0.12.0
+
+Invite-only servers.
+
+- The group password is gone. A new account needs a one-time invite code, made only in the server window: type `invite`. Each code creates one account and works for 24 hours, and up to 10 can be waiting at once. Send each friend their own code.
+- Accounts you already have keep working, and nobody needs to do anything to keep signing in.
+- The server takes the old group password out of its settings file by itself.
+- On a Linux server, `tuffcord invite` (or any other server command) now goes to the running server over ssh, so nobody is disconnected.
+- Admins no longer make invites in the app.
+
 ## 0.11.2
 
 Lighter on your computer and the server.

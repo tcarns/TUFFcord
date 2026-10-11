@@ -10,7 +10,6 @@ use std::path::{Path, PathBuf};
 pub struct Config {
     pub port: u16,
     pub host: String,
-    pub password: String,
     pub app_name: String,
     pub text_channels: Vec<String>,
     pub voice_channels: Vec<String>,
@@ -23,8 +22,6 @@ pub struct Config {
     pub check_updates: bool,
     /// Install new versions by itself and restart when nobody's in voice.
     pub auto_update: bool,
-    /// The group password creates accounts (invites always can).
-    pub allow_signup: bool,
     /// Largest file someone can send.
     pub max_attachment_bytes: u64,
     /// Most space all sent files may use together.
@@ -41,7 +38,6 @@ pub struct Config {
 struct FileConfig {
     port: Option<u16>,
     host: Option<String>,
-    password: Option<String>,
     app_name: Option<String>,
     text_channels: Option<Vec<String>>,
     voice_channels: Option<Vec<String>>,
@@ -52,7 +48,6 @@ struct FileConfig {
     log_file: Option<String>,
     check_updates: Option<bool>,
     auto_update: Option<bool>,
-    allow_signup: Option<bool>,
     max_attachment_mb: Option<u64>,
     max_storage_mb: Option<u64>,
     max_upload_mb_per_day: Option<u64>,
@@ -76,19 +71,11 @@ pub fn random_password() -> String {
         .collect()
 }
 
-fn default_file(password: &str) -> String {
-    format!(
-        r#"# TUFFcord server settings. Restart the server after changing anything here.
+fn default_file() -> String {
+    r#"# TUFFcord server settings. Restart the server after changing anything here.
 
-# Group password: people need it once, to create their account. After that they
-# sign in with their own name and password. Leave it empty ("") to let anyone with
-# the address create an account.
-password = "{password}"
-
-# Set to false to stop the group password creating accounts (once everyone has
-# one). Admins can still invite someone: an invite (made in the app) creates one
-# account and works for a week.
-allow_signup = true
+# New people need a one-time invite to create an account: type "invite" in this
+# window (on a Linux server: tuffcord invite). Each works once, for 24 hours.
 
 port = 3000
 app_name = "TUFFcord"
@@ -126,7 +113,63 @@ check_updates = true
 # reconnect on their own). Set to false to just be told, then type "update" to install.
 auto_update = true
 "#
-    )
+    .to_string()
+}
+
+/// Lines settings files from before 0.12 had for the group password, which
+/// accounts no longer use (invites replaced it).
+const GROUP_PASSWORD_COMMENTS: &[&str] = &[
+    "# Everyone needs this to join. Leave it empty (\"\") to let anyone with the address in.",
+    "# Group password: people need it once, to create their account. After that they",
+    "# sign in with their own name and password. Leave it empty (\"\") to let anyone with",
+    "# the address create an account.",
+    "# Set to false to stop new accounts being created (once everyone has one).",
+    "# Set to false to stop the group password creating accounts (once everyone has",
+    "# one). Admins can still invite someone: an invite (made in the app) creates one",
+    "# account and works for a week.",
+];
+
+/// Take the group password (and `allow_signup`) out of an older settings
+/// file, so the password isn't left lying around, and say how people join now.
+fn drop_group_password(path: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let key = |l: &str| l.split('=').next().unwrap_or("").trim().to_string();
+    let old = |l: &str| l.contains('=') && ["password", "allow_signup"].contains(&key(l).as_str());
+    if !text.lines().any(old) {
+        return None;
+    }
+    let nl = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    let mut out = String::new();
+    let mut added = false;
+    let mut blank = false;
+    for l in text.lines() {
+        if old(l) || GROUP_PASSWORD_COMMENTS.contains(&l.trim_end()) {
+            if !added {
+                out += "# New people need a one-time invite to create an account: type \"invite\" in this";
+                out += nl;
+                out +=
+                    "# window (on a Linux server: tuffcord invite). Each works once, for 24 hours.";
+                out += nl;
+                added = true;
+            }
+            blank = false;
+            continue;
+        }
+        // Don't leave runs of empty lines where the old block was.
+        if l.trim().is_empty() && blank {
+            continue;
+        }
+        blank = l.trim().is_empty();
+        out += l;
+        out += nl;
+    }
+    let tmp = path.with_extension("toml.tmp");
+    std::fs::write(&tmp, out).ok()?;
+    std::fs::rename(&tmp, path).ok()?;
+    Some(format!(
+        "Took the group password out of {}: accounts are now created only with one-time invites. Type \"invite\" here to make one.",
+        path.display()
+    ))
 }
 
 /// `TUFFcord-server.toml` next to the server. Backroom (before 0.8) called it
@@ -279,7 +322,7 @@ pub fn save_channels(path: &Path, text: &[String], voice: &[String]) -> std::io:
     // No file yet (settings from environment variables): start from the
     // default one, as a first run would have.
     let old = match std::fs::read_to_string(path) {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => default_file(&random_password()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => default_file(),
         r => r?,
     };
     let nl = if old.contains("\r\n") { "\r\n" } else { "\n" };
@@ -354,6 +397,9 @@ pub fn load() -> Config {
     if let Some(note) = rename_in_file(&config_path) {
         notes.push((Level::Info, note));
     }
+    if let Some(note) = drop_group_password(&config_path) {
+        notes.push((Level::Warn, note));
+    }
     if config_path.exists() {
         match std::fs::read_to_string(&config_path)
             .map_err(|e| e.to_string())
@@ -368,13 +414,12 @@ pub fn load() -> Config {
                 ),
             )),
         }
-    } else if std::env::var_os("PASSWORD").is_none() {
-        let pw = random_password();
-        match std::fs::write(&config_path, default_file(&pw)) {
-            Ok(()) => {
-                notes.push((Level::Warn, format!("First run: created {} with the group password \"{pw}\". Change it there if you like.", config_path.display())));
-                file.password = Some(pw);
-            }
+    } else {
+        match std::fs::write(&config_path, default_file()) {
+            Ok(()) => notes.push((
+                Level::Info,
+                format!("First run: created {}.", config_path.display()),
+            )),
             Err(e) => notes.push((
                 Level::Warn,
                 format!(
@@ -406,7 +451,6 @@ pub fn load() -> Config {
     let host = env("HOST")
         .or(file.host)
         .unwrap_or_else(|| "0.0.0.0".into());
-    let password = env("PASSWORD").or(file.password).unwrap_or_default();
     let app_name = env("APP_NAME")
         .or(file.app_name)
         .unwrap_or_else(|| "TUFFcord".into());
@@ -490,11 +534,6 @@ pub fn load() -> Config {
         None => file.auto_update.unwrap_or(true),
     };
 
-    let allow_signup = match env("ALLOW_SIGNUP") {
-        Some(v) => !["0", "false", "no", "off"].contains(&v.to_lowercase().as_str()),
-        None => file.allow_signup.unwrap_or(true),
-    };
-
     let max_attachment_mb = parse_num("MAX_ATTACHMENT_MB", env("MAX_ATTACHMENT_MB"), &mut notes)
         .map(|n| n as u64)
         .or(file.max_attachment_mb)
@@ -505,9 +544,6 @@ pub fn load() -> Config {
         .or(file.max_storage_mb)
         .unwrap_or(5120)
         .max(max_attachment_mb);
-    if password.is_empty() && allow_signup {
-        notes.push((Level::Warn, "The group password is empty, so anyone who knows this server's address can create an account. Set password in the settings file, or allow_signup = false.".into()));
-    }
     let max_upload_mb_per_day = parse_num(
         "MAX_UPLOAD_MB_PER_DAY",
         env("MAX_UPLOAD_MB_PER_DAY"),
@@ -523,10 +559,8 @@ pub fn load() -> Config {
         max_storage_bytes: max_storage_mb * 1024 * 1024,
         check_updates,
         auto_update,
-        allow_signup,
         port,
         host,
-        password,
         app_name,
         text_channels,
         voice_channels,
@@ -571,7 +605,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("br-cfg-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("TUFFcord-server.toml");
-        let new = default_file("pw");
+        let new = default_file();
         let old = new.replace(NEW_ATTACHMENT_BLOCK, OLD_ATTACHMENT_BLOCK);
         assert_ne!(old, new);
 
@@ -605,7 +639,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("tuff-cfg-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let old_text = default_file("secret")
+        let old_text = default_file()
             .replace("data/TUFFcord.log", "data/backroom.log")
             .replace("TUFFcord", "Backroom")
             .replace('\n', "\r\n");
@@ -619,7 +653,6 @@ mod tests {
         assert!(got.contains("app_name = \"TUFFcord\"\r\n"));
         assert!(got.starts_with("# TUFFcord server settings."));
         assert!(got.contains("# Check GitHub for a newer TUFFcord.\r\n"));
-        assert!(got.contains("password = \"secret\""));
         assert!(
             got.contains("log_file = \"data/TUFFcord.log\""),
             "log is renamed too"
@@ -650,6 +683,43 @@ mod tests {
         std::fs::write(dir.join("backroom.log"), "again").unwrap();
         assert!(move_old_log(&log).is_none());
         assert!(move_old_log(&dir.join("custom.log")).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn group_password_is_taken_out_of_old_settings() {
+        let dir = std::env::temp_dir().join(format!("tuff-pw-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("TUFFcord-server.toml");
+        let old = format!(
+            "# top\n\n{}\n{}\n{}\npassword = \"hunter22\"\n\n{}\n{}\n{}\nallow_signup = true\n\nport = 3000\n",
+            GROUP_PASSWORD_COMMENTS[1],
+            GROUP_PASSWORD_COMMENTS[2],
+            GROUP_PASSWORD_COMMENTS[3],
+            GROUP_PASSWORD_COMMENTS[5],
+            GROUP_PASSWORD_COMMENTS[6],
+            GROUP_PASSWORD_COMMENTS[7],
+        );
+        for text in [old.clone(), old.replace('\n', "\r\n")] {
+            std::fs::write(&path, &text).unwrap();
+            assert!(drop_group_password(&path).is_some());
+            let got = std::fs::read_to_string(&path)
+                .unwrap()
+                .replace("\r\n", "\n");
+            assert!(
+                !got.contains("hunter22")
+                    && !got.contains("allow_signup")
+                    && !got.contains("Group password")
+            );
+            assert!(got.starts_with("# top\n\n# New people need a one-time invite"));
+            assert!(got.ends_with("\n\nport = 3000\n"), "{got}");
+            assert!(drop_group_password(&path).is_none(), "only once");
+        }
+        std::fs::write(&path, default_file()).unwrap();
+        assert!(
+            drop_group_password(&path).is_none(),
+            "new files are left alone"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

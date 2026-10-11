@@ -96,7 +96,7 @@ async def run():
     wait_port(port)
     check(os.path.exists(exe) and not os.path.exists(old_exe), "the old program name becomes TUFFcord-server")
     s = Server.__new__(Server)  # just for its sign-in helpers, pointed at this server
-    s.port, s.group = port, "g"
+    s.port, s.group, s.dir, s.p = port, "g", srv_dir, watcher
     alice, w = await s.register("Alice")
     check(w and w["type"] == "welcome", "someone is signed in before the update")
 

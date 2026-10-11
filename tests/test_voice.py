@@ -15,7 +15,7 @@ async def run():
 
     def start(name, *args, channel="Lounge"):
         out = os.path.join(s.dir, f"{name}.out")
-        procs[name] = (spawn([binary("tuffcord-bot"), "--server", s.url, "--password", "g", "--name", name,
+        procs[name] = (spawn([binary("tuffcord-bot"), "--server", s.url, "--password", s.invite(), "--name", name,
                               "--channel", channel, "--seconds", "8", *args],
                              stdout=open(out, "w"), stderr=subprocess.STDOUT), out)
 

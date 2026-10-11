@@ -1,6 +1,6 @@
-"""Invites, signed-in devices, new-address notices, the admin log, and
+"""Console invites, commands for a running server, signed-in devices, new-address notices, the admin log, and
 look-alike names."""
-import asyncio
+import asyncio, json, os, re, subprocess, time
 
 from lib import Server, check, main, note
 
@@ -8,32 +8,48 @@ GROUP = "letmein"
 
 
 async def run():
-    s = Server(group=GROUP, ALLOW_SIGNUP="false")
+    s2 = Server(name="open", group=GROUP)
 
     note("Invites")
-    _, r = await s.register("Owner", "ownerpass1")
-    check(r and r["code"] == "signup_closed", "with allow_signup off the group password can't create accounts")
-    s2 = Server(name="open", group=GROUP)
+    _, r = await s2.register("Owner", "ownerpass1", invite=GROUP)
+    check(r and r["code"] == "bad_password", "the old group password can't create an account")
+    _, r = await s2.register("Owner", "ownerpass1", invite="")
+    check(r and r["code"] == "bad_password", "...nor can no invite")
     owner, r = await s2.register("Owner", "ownerpass1", ip="198.51.100.1")
-    check(r and r["type"] == "welcome" and {"invites", "sessions", "adminLog"} <= set(r["features"]), "welcome lists invites, sessions and adminLog")
+    check(r and r["type"] == "welcome" and {"sessions", "adminLog"} <= set(r["features"]) and "invites" not in r["features"],
+          "a console invite creates an account; welcome lists sessions and adminLog, not app invites")
     owner_token = r["token"]
     s2.console("admin Owner")
     await owner.wait("accountUpdated")
     await owner.send(type="createInvite")
-    r = await owner.wait("invite")
-    check(r and len(r["code"]) == 10 and r["expires"] > 0, "an admin gets a one-time invite code")
-    code = r["code"]
+    r = await owner.wait("error")
+    check(r and r["code"] == "invite_failed" and "server window" in r["message"], "admins can't make invites in the app (told to use the server window)")
+    code = s2.invite()
+    check(len(code) == 10, "the console prints a 10-character invite code")
+    accounts = json.load(open(os.path.join(s2.dir, "data", "accounts.json")))
+    left = max(i["expires"] for i in accounts["invites"]) / 1000 - time.time()
+    check(23.9 * 3600 < left <= 24 * 3600, "invites last 24 hours")
     mallory, _ = await s2.register("Mallory", "mallorypass")
-    await mallory.send(type="createInvite")
-    r = await mallory.wait("error")
-    check(r and r["code"] == "invite_failed", "non-admins can't make invites")
     _, r = await s2.register("Guest", "guestpass1", invite=code)
-    check(r and r["type"] == "welcome", "the invite creates an account in place of the group password")
+    check(r and r["type"] == "welcome", "the invite creates an account")
     _, r = await s2.register("Guest2", "guestpass1", invite=code)
     check(r and r["code"] == "bad_password", "...once only")
+    for _ in range(11):
+        s2.console("invite")
+    time.sleep(0.5)
+    check(s2.log().count("Invite code: ") == 13 and "already 10 unused invites" in s2.log(), "at most 10 unused invites at once")
+
+    note("Commands from the command line")
+    out = subprocess.run([s2.exe, "status"], env=s2.env, capture_output=True, text=True, timeout=10)
+    check(out.returncode == 0 and "Owner" in out.stdout, "TUFFcord-server status answers from the running server")
+    out = subprocess.run([s2.exe, "invite"], env=s2.env, capture_output=True, text=True, timeout=10)
+    check(out.returncode == 0 and "already 10" in out.stdout, "...and invite too (still capped)")
+    mode = os.stat(os.path.join(s2.dir, "data", "console.sock")).st_mode & 0o777
+    check(mode == 0o600, "only the server's own user can send commands")
 
     note("Look-alike names")
-    _, r = await s2.register("Ownеr", "ownerpass1")
+    spare = re.findall(r"Invite code: (\w+)", s2.log())[-1]
+    _, r = await s2.register("Ownеr", "ownerpass1", invite=spare)
     check(r and r["code"] == "bad_name", "a name mixing Latin and Cyrillic letters is refused")
 
     note("Signed-in devices")
@@ -78,7 +94,7 @@ async def run():
     await later.send(type="adminLog")
     r = await later.wait("adminLog")
     texts = [e["text"] for e in (r or {}).get("entries", [])]
-    check(texts[:1] == ["Owner kicked Mallory"] and "Owner made an invite" in texts, "admins see recent admin actions, newest first")
+    check(texts[:1] == ["Owner kicked Mallory"] and "The server console made an invite" in texts, "admins see recent admin actions, newest first")
     mallory, _ = await s2.login("Mallory", "mallorypass")
     await mallory.send(type="adminLog")
     r = await mallory.wait("adminLog", timeout=1)
@@ -88,7 +104,7 @@ async def run():
     await c.send(type="adminLog")
     r = await c.wait("adminLog")
     check(r and len(r["entries"]) >= 2, "the admin log survives a restart")
-    s.stop(), s2.stop()
+    s2.stop()
 
 
 main(run)

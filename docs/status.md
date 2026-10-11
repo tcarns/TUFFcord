@@ -2,9 +2,28 @@
 
 Where things stand. Rewrite (don't append) at the end of each working session.
 
-**Last updated:** 2026-10-11. **Released:** 0.11.2 (signed, `release-check.sh` all OK).
+**Last updated:** 2026-10-11. **Released:** 0.11.2 (signed). **Pushed, waiting for the owner to sign:** 0.12.0.
 
 ## Waiting on the owner
+- Sign and publish 0.12.0 (`docs/releasing.md`), then check on his PC: the
+  server window's `invite` prints a code, Create account with it works, his
+  settings file no longer has `password`/`allow_signup` (the server takes them
+  out on first start), and Settings > Account no longer has "Make an invite".
+
+## Invite-only (0.12.0)
+- Group password removed: `auth.rs` register needs a valid invite; old apps
+  sending name + password only get in with their account's own password.
+- Invites (`invites.rs`): console only (`invite`), 24 hours, single use, at
+  most 10 open; app-made invites from 0.11 are dropped. `createInvite` from
+  0.11 apps gets an error pointing at the server window. Welcome no longer
+  lists the `invites` feature.
+- `console.rs`: console commands moved out of `main.rs`; on Linux the running
+  server also takes them through `data/console.sock` (mode 600), so
+  `TUFFcord-server <command>` (wrapper `tuffcord` from `install.sh`) works over
+  ssh without stopping the service.
+- Checked: all suites with `--compat` against 0.11.1 (security suite covers
+  the new rules and the socket), unit test for the settings-file cleanup,
+  Windows check.
 - Optional: Settings' memory figure on his PC, idle and in a call (no
   Windows numbers yet). Re-paste `analysis/cloud-env-setup.sh` into the cloud
   environment (adds Xvfb/Mesa libs for the perf suite and openssh-client).
@@ -68,6 +87,8 @@ Report with every finding: `analysis/security-review.md` in the project files.
 - Optional, later: HTTPS built into the server (drops Caddy, ~30 MB).
 
 ## Recent releases (all confirmed by the owner unless noted)
+- 0.11.2: fewer redraws in calls, server returns hash memory.
+- 0.11.1: owner-signed releases, trash for deleted channels.
 - 0.10.0: full history on disk with load-older, admin storage bar, Linux
   server with self-update.
 - 0.9.3: video preview frames, middle-click auto scroll, button hover.

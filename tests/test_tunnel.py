@@ -44,7 +44,7 @@ def pair(label, app_bin, server_bin, bundle):
     wait_port(tport)
     url = f"wss://localhost:{tport}/ws"
     env = dict(os.environ, SSL_CERT_FILE=bundle)
-    bot = lambda name, *a, seconds: [binary("tuffcord-bot", app_bin), "--server", url, "--password", "g",
+    bot = lambda name, *a, seconds: [binary("tuffcord-bot", app_bin), "--server", url, "--password", s.invite(),
                                      "--name", name, "--seconds", str(seconds), *a]
     recv_out = os.path.join(s.dir, "recv.json")
     recv = spawn(bot("Recv", seconds=10), env=env, stdout=open(recv_out, "w"), stderr=subprocess.STDOUT)

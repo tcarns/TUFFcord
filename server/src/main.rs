@@ -12,6 +12,7 @@ mod admin;
 mod auth;
 mod channels;
 mod config;
+mod console;
 mod files;
 mod history;
 mod invites;
@@ -26,7 +27,6 @@ use futures_util::{SinkExt, StreamExt};
 use log::Level;
 use proto::*;
 use std::collections::{BTreeMap, HashMap, VecDeque};
-use std::io::BufRead;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -1038,45 +1038,6 @@ fn request_attachment(st: &State, client_id: u32, att_id: &str) {
     });
 }
 
-// ---------------------------------------------------------------- console commands
-
-fn console_commands(shared: Shared, updates: std::sync::mpsc::Sender<selfupdate::Request>) {
-    let stdin = std::io::stdin();
-    for line in stdin.lock().lines() {
-        let Ok(line) = line else { break };
-        let mut parts = line.split_whitespace();
-        let Some(cmd) = parts.next() else { continue };
-        let arg = parts.collect::<Vec<_>>().join(" ");
-        match cmd.to_lowercase().as_str() {
-            "help" => println!(
-                "Commands:\n  level              show the current log level\n  level <name>       change it now ({})\n  status             who is online and in voice, uptime, memory use\n  update             install the newest version now and restart\n{}\n{}\n  help               show this list",
-                log::LEVEL_NAMES.join(", "),
-                admin::CONSOLE_HELP,
-                trash::CONSOLE_HELP
-            ),
-            "level" if arg.is_empty() => println!("Log level is \"{}\". Options, most to least detail: {}", log::level().name(), log::LEVEL_NAMES.join(", ")),
-            "level" => match Level::parse(&arg) {
-                Some(l) => {
-                    let before = log::level();
-                    log::set_level(l);
-                    log::write(Level::Info, "server", &format!("Log level changed from {} to {}", before.name(), l.name()), true);
-                }
-                None => println!("\"{arg}\" isn't a log level. Options: {}", log::LEVEL_NAMES.join(", ")),
-            },
-            "status" => println!("{}", shared.lock().unwrap().status_text()),
-            "update" => {
-                let _ = updates.send(selfupdate::Request::Now);
-            }
-            other => match admin::console(&shared, other, &arg)
-                .or_else(|| trash::console(&shared, other, &arg))
-            {
-                Some(out) => println!("{out}"),
-                None => println!("Unknown command \"{cmd}\". Type \"help\" for the list."),
-            },
-        }
-    }
-}
-
 // ---------------------------------------------------------------- updates
 
 /// Restart into a newly installed version once nobody would notice: no one in
@@ -1126,6 +1087,8 @@ async fn restart_for_update(shared: &Shared, version: String) -> ! {
 
 fn main() {
     selfupdate::print_version_if_asked();
+    // `TUFFcord-server <command>`: for the server already running.
+    console::send_if_asked();
     // Double-clicked: become the watcher that runs (and restarts) the server.
     selfupdate::watch_unless_child();
     limits::return_hash_memory();
@@ -1257,18 +1220,13 @@ async fn run(cfg: Arc<Config>) {
         cfg.text_channels.join(", "),
         cfg.voice_channels.join(", ")
     );
-    if cfg.password.is_empty() {
-        warn!(
-            "server",
-            "No group password set: anyone with the address can create an account."
-        );
-    }
     auth::startup_notes(&shared.lock().unwrap().accounts);
 
     let (update_tx, update_rx) = std::sync::mpsc::channel();
     {
         let shared = shared.clone();
-        std::thread::spawn(move || console_commands(shared, update_tx));
+        let data_dir = shared.lock().unwrap().cfg.data_dir.clone();
+        console::start(shared, update_tx, &data_dir);
     }
 
     {

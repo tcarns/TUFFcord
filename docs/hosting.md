@@ -65,8 +65,8 @@ Running it again is safe (it keeps settings and data).
 
 ## 5. Move your server's data over
 
-Your current server folder on the PC has `TUFFcord-server.toml` (settings and
-the group password) and `data\` (accounts, messages, files).
+Your current server folder on the PC has `TUFFcord-server.toml` (settings) and
+`data\` (accounts, messages, files).
 
 1. On the PC: close the server window (Ctrl+C), so nothing changes while copying.
 2. On the VPS (still in ssh): `systemctl stop tuffcord` and
@@ -109,8 +109,7 @@ brings the old server back (with the messages as they were when you copied).
   `max_storage_mb` or the disk is 80% full. To make room: Hetzner →
   your server → **Volumes** (about $2.50 a month per 50 GB) or **Rescale** to
   a bigger disk, then raise `max_storage_mb`.
-- **Console commands** (the ones typed into the server window at home, e.g.
-  `admin <name>`): admins do most of this in the app. If one is needed:
-  `systemctl stop tuffcord`, then
-  `cd /opt/tuffcord && sudo -u tuffcord ./TUFFcord-server`, type the command,
-  Ctrl+C, `systemctl start tuffcord`.
+- **Console commands** (the ones typed into the server window at home): over
+  ssh, type `tuffcord <command>`, e.g. `tuffcord invite` for a one-time invite
+  code, `tuffcord status`, `tuffcord help`. The running server answers; nobody
+  is disconnected.
