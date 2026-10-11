@@ -78,7 +78,7 @@ pub const SUMS_FILE: &str = "SHA256SUMS.txt";
 /// whole; the signature proves the release came from us.
 pub const SIG_FILE: &str = "SHA256SUMS.txt.sig";
 /// The public half of the release key.
-const RELEASE_KEY: &str = "208ddb6af3d698ca4113d5b70cf8f7e4d125fb7f1b07a883d2ab76690ba3ba20";
+const RELEASE_KEY: &str = "565816b56df7a234d2f6ff1eeaeee1fba5ab334d8f69dd813938b7b01329eebe";
 
 fn hex_bytes<const N: usize>(s: &str) -> Option<[u8; N]> {
     let s = s.trim();
