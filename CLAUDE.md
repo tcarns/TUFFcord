@@ -39,12 +39,12 @@ time; hosting at home must keep working.
 ## Layout
 - `proto/` shared by both: `lib.rs` wire protocol (serde, camelCase JSON),
   `files.rs` file-transfer types and sniffing, `update.rs` GitHub release
-  check, verified download, exe swap.
+  check, verified download, exe swap; `sshsig.rs` checks `ssh-keygen -Y sign` release signatures.
 - `server/src/` tokio current_thread. `main.rs` state, message handling, chat,
   voice relay, console commands; `history.rs` recent messages, archive of older
   ones (`data/history/*.jsonl`), `loadOlder`, deleting messages; `storage.rs`
   file storage limit, admins' storage warning; `auth.rs` sign-in; `admin.rs` admin
-  actions (owner rule); `limits.rs` wrong-password counts, hash and connection caps; `invites.rs` one-time invites; `sessions.rs` signed-in devices, new-address notices; `adminlog.rs` admin log (`admin_log!`); `channels.rs` admins adding, renaming, deleting, reordering channels; `accounts.rs` storage (argon2); `files.rs` HTTP endpoints on the same
+  actions (owner rule); `limits.rs` wrong-password counts, hash and connection caps; `invites.rs` one-time invites; `sessions.rs` signed-in devices, new-address notices; `adminlog.rs` admin log (`admin_log!`); `channels.rs` admins adding, renaming, deleting, reordering channels; `trash.rs` deleted text channels kept 30 days (`restore`); `accounts.rs` storage (argon2); `files.rs` HTTP endpoints on the same
   port (POST/PUT/GET /files, Range, chunked bodies); `selfupdate.rs` watcher +
   updater; `config.rs` settings file and its upgrades; `log.rs`.
 - `client/src/` egui 0.32 (glow). The `App` struct is split across files,
@@ -108,8 +108,8 @@ time; hosting at home must keep working.
 - Wine UI: `tools/wine-ui.sh start <exe>`, `shot out.png 400x80+340+440`, `stop`.
 - Release: bump `version` in root `Cargo.toml`, add a `## x.y.z` section at the
   top of `CHANGELOG.md` (it becomes the notes the app shows), commit, push to
-  main, approve the run (signing setup: `docs/releasing.md`,
-  `tools/release-key.py`). Then `tools/release-check.sh` (run passed, files, checksums, old-name
+  main. That builds a draft; Tyler signs it on his PC and runs Publish release
+  (`docs/releasing.md`; key never in GitHub). Then `tools/release-check.sh` (run passed, files, checksums, signature, old-name
   copies, zip, `--version`). `gh release` uses GraphQL, which the proxy blocks;
   use `gh api` (REST).
 - Commits: author Tyler Carns (repo-local config is set); end messages with

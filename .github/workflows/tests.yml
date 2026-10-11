@@ -28,5 +28,5 @@ jobs:
 
       - name: End-to-end tests
         run: |
-          pip install --quiet websockets
+          pip install --quiet --require-hashes -r tests/requirements.txt
           tests/run.py

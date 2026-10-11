@@ -19,6 +19,7 @@ mod limits;
 mod selfupdate;
 mod sessions;
 mod storage;
+mod trash;
 
 use config::Config;
 use futures_util::{SinkExt, StreamExt};
@@ -1048,9 +1049,10 @@ fn console_commands(shared: Shared, updates: std::sync::mpsc::Sender<selfupdate:
         let arg = parts.collect::<Vec<_>>().join(" ");
         match cmd.to_lowercase().as_str() {
             "help" => println!(
-                "Commands:\n  level              show the current log level\n  level <name>       change it now ({})\n  status             who is online and in voice, uptime, memory use\n  update             install the newest version now and restart\n{}\n  help               show this list",
+                "Commands:\n  level              show the current log level\n  level <name>       change it now ({})\n  status             who is online and in voice, uptime, memory use\n  update             install the newest version now and restart\n{}\n{}\n  help               show this list",
                 log::LEVEL_NAMES.join(", "),
-                admin::CONSOLE_HELP
+                admin::CONSOLE_HELP,
+                trash::CONSOLE_HELP
             ),
             "level" if arg.is_empty() => println!("Log level is \"{}\". Options, most to least detail: {}", log::level().name(), log::LEVEL_NAMES.join(", ")),
             "level" => match Level::parse(&arg) {
@@ -1065,7 +1067,9 @@ fn console_commands(shared: Shared, updates: std::sync::mpsc::Sender<selfupdate:
             "update" => {
                 let _ = updates.send(selfupdate::Request::Now);
             }
-            other => match admin::console(&shared, other, &arg) {
+            other => match admin::console(&shared, other, &arg)
+                .or_else(|| trash::console(&shared, other, &arg))
+            {
                 Some(out) => println!("{out}"),
                 None => println!("Unknown command \"{cmd}\". Type \"help\" for the list."),
             },
@@ -1306,6 +1310,9 @@ async fn run(cfg: Arc<Config>) {
                     if seconds % 60 == 0 {
                         files::sweep(&mut st);
                         storage::check(&mut st);
+                    }
+                    if seconds % 3600 == 10 {
+                        trash::purge(&st.cfg.data_dir);
                     }
                     if st.accounts.dirty {
                         if let Err(e) = st.accounts.save() {

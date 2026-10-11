@@ -1,7 +1,7 @@
 """Admins adding, renaming, deleting and reordering channels: only admins,
 names are cleaned, duplicates refused, everyone gets the new lists, messages
 and people in voice move with a rename, and it all survives a restart."""
-import asyncio
+import asyncio, os
 
 from lib import Server, check, main
 
@@ -86,9 +86,32 @@ async def run():
 
     await alice.send(type="createChannel", name="temp")
     await alice.wait("channels"), await bob.wait("channels")
+    await alice.send(type="chat", channel="temp", text="keep me")
+    await bob.wait("chat"), await alice.wait("chat")
+    _, up = s.upload(w["fileKey"], "clip.bin", os.urandom(3000))
+    await alice.send(type="post", channel="temp", text="a file", files=[{"upload": up["id"], "width": 0, "height": 0}])
+    await bob.wait("chat"), await alice.wait("chat")
     await alice.send(type="deleteChannel", name="temp")
     ca, cb = await alice.wait("channels"), await bob.wait("channels")
     check(cb and "temp" not in cb["textChannels"], "a text channel can be deleted")
+    status, _, _ = s.http("GET", f"/files/{up['id']}", key=w["fileKey"])
+    check(status == 404, "...its files are gone from the server")
+    trash = os.path.join(s.dir, "data", "trash")
+    check(os.path.isdir(trash) and len(os.listdir(trash)) == 1, "...but kept in the trash")
+
+    # The server window brings it back (fix for a stolen admin account).
+    s.console("restore 1")
+    cb = await bob.wait("channels")
+    check(cb and "temp" in cb["textChannels"], "a deleted channel can be restored from the server window")
+    await bob.send(type="loadOlder", channel="temp")
+    o = await bob.wait("olderMessages")
+    check(o and [m["text"] for m in o["messages"]] == ["keep me", "a file"], "...with its messages")
+    status, _, _ = s.http("GET", f"/files/{up['id']}", key=w["fileKey"])
+    check(status == 200, "...and its files")
+    check(not os.listdir(trash), "...and it leaves the trash")
+    await alice.wait("channels")
+    await alice.send(type="deleteChannel", name="temp")
+    await alice.wait("channels"), await bob.wait("channels")
 
     await drain(bob, "voiceState")
     await alice.send(type="deleteChannel", name="Night Talk", voice=True)
@@ -116,6 +139,7 @@ async def run():
     s.stop()
     log = s.log()
     check("added the text channel #movie-night" in log, "the server log says who added it")
+    check("restored the text channel #temp (2 message(s), 1 file(s))" in log, "the restore is in the admin log")
     check("renamed the text channel #movie-night to #film-club" in log
           and "deleted the voice channel Night Talk" in log, "...and who renamed and deleted")
 

@@ -1,0 +1,5 @@
+# Pinned by hash for the CI runners (Python 3.12 on Ubuntu): the native wheel,
+# or the pure-Python one.
+websockets==17.2 \
+    --hash=sha256:6627b913b8586b1c06db9516b31dd0dfbc621de3bb9312616d92a7e44f268a5b \
+    --hash=sha256:6aa59f0ef92e796b2db6f5f26550c4713c0e4036899fadf02f55e2ed4db0b7ae

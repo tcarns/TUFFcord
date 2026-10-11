@@ -1,8 +1,9 @@
 """Server self-update on Linux, through the watcher: a copy still named
 backroom-server takes its new name when started, then it finds a newer release on a
 local web server, refuses it while it isn't signed with the release key, checks
-and installs it, restarts (people reconnect), refuses a mislabeled release, and Ctrl+C stops watcher and server together."""
-import asyncio, hashlib, json, os, shutil, signal, subprocess, sys, time
+and installs it, restarts (people reconnect), refuses a signed release under
+another version, and Ctrl+C stops watcher and server together."""
+import asyncio, base64, hashlib, json, os, shutil, signal, struct, subprocess, sys, time
 
 from lib import DIR, Server, binary, check, free_port, main, spawn, wait_port
 
@@ -10,25 +11,45 @@ ASSET = "TUFFcord-server"
 
 
 def write_release(rel, port, version):
-    names = [ASSET, "SHA256SUMS.txt", "SHA256SUMS.txt.sig"]
+    names = [ASSET, "SHA256SUMS.txt", "SHA256SUMS.txt.sshsig"]
     json.dump({"tag_name": f"v{version}", "html_url": "x", "body": "test", "draft": False, "prerelease": False,
                "assets": [{"name": n, "browser_download_url": f"http://127.0.0.1:{port}/{n}", "size": 1}
                           for n in names]},
               open(os.path.join(rel, "release.json"), "w"))
 
 
+def _s(b):
+    return struct.pack(">I", len(b)) + b
+
+
+def _pub_blob(path):
+    der = subprocess.run(["openssl", "pkey", "-in", path, "-pubout", "-outform", "DER"],
+                         check=True, capture_output=True).stdout
+    return _s(b"ssh-ed25519") + _s(der[-32:])
+
+
 def sign(rel, key):
-    """Sign the release's checksums with `key` (a PEM file), like the release workflow."""
-    sums, sig = os.path.join(rel, "SHA256SUMS.txt"), os.path.join(rel, "sig.bin")
-    subprocess.run(["openssl", "pkeyutl", "-sign", "-inkey", key, "-rawin", "-in", sums, "-out", sig], check=True)
-    open(sums + ".sig", "w").write(open(sig, "rb").read().hex() + "\n")
+    """Sign the release's checksums with `key` (a PEM file) the way
+    `ssh-keygen -Y sign -n tuffcord-release` does (the owner's signing script)."""
+    sums = open(os.path.join(rel, "SHA256SUMS.txt"), "rb").read()
+    ns = b"tuffcord-release"
+    signed = b"SSHSIG" + _s(ns) + _s(b"") + _s(b"sha512") + _s(hashlib.sha512(sums).digest())
+    data = os.path.join(rel, "signed.bin")
+    open(data, "wb").write(signed)
+    raw = subprocess.run(["openssl", "pkeyutl", "-sign", "-inkey", key, "-rawin", "-in", data],
+                         check=True, capture_output=True).stdout
+    blob = (b"SSHSIG" + struct.pack(">I", 1) + _s(_pub_blob(key)) + _s(ns) + _s(b"") + _s(b"sha512")
+            + _s(_s(b"ssh-ed25519") + _s(raw)))
+    b = base64.b64encode(blob).decode()
+    lines = [b[i:i + 70] for i in range(0, len(b), 70)]
+    open(os.path.join(rel, "SHA256SUMS.txt.sshsig"), "w").write(
+        "-----BEGIN SSH SIGNATURE-----\n" + "\n".join(lines) + "\n-----END SSH SIGNATURE-----\n")
 
 
 def new_key(path):
+    """A new Ed25519 key; returns its public half as a .pub line."""
     subprocess.run(["openssl", "genpkey", "-algorithm", "ed25519", "-out", path], check=True)
-    der = subprocess.run(["openssl", "pkey", "-in", path, "-pubout", "-outform", "DER"],
-                         check=True, capture_output=True).stdout
-    return der[-32:].hex()
+    return "ssh-ed25519 " + base64.b64encode(_pub_blob(path)).decode() + " test"
 
 
 async def wait_log(path, text, timeout=20):
@@ -50,7 +71,8 @@ async def run():
     # recognizably a different file once installed.
     new = open(binary("TUFFcord-server"), "rb").read() + b"\0new-version"
     open(os.path.join(rel, ASSET), "wb").write(new)
-    open(os.path.join(rel, "SHA256SUMS.txt"), "w").write(f"{hashlib.sha256(new).hexdigest()}  {ASSET}\n")
+    open(os.path.join(rel, "SHA256SUMS.txt"), "w").write(
+        f"version 99.0.0\n{hashlib.sha256(new).hexdigest()}  {ASSET}\n")
     os.chmod(os.path.join(rel, ASSET), 0o755)
     key, other = os.path.join(DIR, "release.pem"), os.path.join(DIR, "other.pem")
     pub = new_key(key)
@@ -95,10 +117,11 @@ async def run():
     check(open(exe, "rb").read() == new, "the new version is installed in place")
     check(await wait_log(out, "Restarted to finish updating"), "the restarted server says why it restarted")
 
-    # A release whose program reports a different version is refused.
+    # A signed release passed off as another version is refused (its
+    # checksums name the version they were signed for).
     write_release(rel, http_port, "98.0.0")
     watcher.stdin.write("update\n"), watcher.stdin.flush()
-    check(await wait_log(out, "says it's version 99.0.0, not 98.0.0"), "a mislabeled release is refused")
+    check(await wait_log(out, "TUFFcord 98.0.0 is out, but it isn't signed"), "a signed release under another version is refused")
     check(open(exe, "rb").read() == new, "...and nothing is changed")
 
     # Ctrl+C on the watcher stops both.

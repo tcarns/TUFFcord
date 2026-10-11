@@ -1,0 +1,61 @@
+# Publishes a draft release made by the Release workflow, once the owner has
+# signed its SHA256SUMS.txt on his own PC (docs/releasing.md). Refuses unless
+# the signature checks out against RELEASE_KEY in proto/src/update.rs and the
+# checksums name this version.
+
+name: Publish release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish, e.g. 0.11.1"
+        required: true
+      signature:
+        description: "Contents of SHA256SUMS.txt.sig (paste it all; line breaks don't matter)"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            proto/src/update.rs
+            tools/verify-release.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Check the signature
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          SIGNATURE: ${{ inputs.signature }}
+        run: |
+          VERSION=${VERSION#v}
+          gh release download "v$VERSION" --repo "$GITHUB_REPOSITORY" --pattern SHA256SUMS.txt --dir "$RUNNER_TEMP/rel"
+          printf '%s\n' "$SIGNATURE" > "$RUNNER_TEMP/rel/SHA256SUMS.txt.sshsig"
+          tools/verify-release.sh "$RUNNER_TEMP/rel/SHA256SUMS.txt" "$RUNNER_TEMP/rel/SHA256SUMS.txt.sshsig" "$VERSION"
+          # Store it the way ssh-keygen writes it.
+          body=$(sed -e 's/-----BEGIN SSH SIGNATURE-----//g' -e 's/-----END SSH SIGNATURE-----//g' "$RUNNER_TEMP/rel/SHA256SUMS.txt.sshsig" | tr -d ' \r\n\t')
+          { echo "-----BEGIN SSH SIGNATURE-----"; fold -w 70 <<<"$body"; echo "-----END SSH SIGNATURE-----"; } > "$RUNNER_TEMP/rel/SHA256SUMS.txt.sshsig"
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          VERSION=${VERSION#v}
+          gh release upload "v$VERSION" "$RUNNER_TEMP/rel/SHA256SUMS.txt.sshsig" --repo "$GITHUB_REPOSITORY" --clobber
+          gh release edit "v$VERSION" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          echo "v$VERSION is published." >> "$GITHUB_STEP_SUMMARY"

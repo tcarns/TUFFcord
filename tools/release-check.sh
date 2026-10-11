@@ -28,14 +28,21 @@ for u in $urls; do curl -sSL -o "$dir/$(basename "$u")" "$u"; done
 (cd "$dir" && sha256sum --quiet -c SHA256SUMS.txt >/dev/null 2>&1); ok $? "checksums match"
 cmp -s "$dir/TUFFcord.exe" "$dir/backroom.exe" && cmp -s "$dir/TUFFcord-server.exe" "$dir/backroom-server.exe"
 ok $? "old-name copies are identical (for copies from before the rename)"
-# From 0.11 the checksums are signed with the release key the programs carry.
-major_minor=$(echo "$v" | awk -F. '{ printf "%d%03d", $1, $2 }')
-if [ "$major_minor" -ge 11 ]; then
-  pub=$(grep -oE 'RELEASE_KEY: &str = "[0-9a-f]{64}"' proto/src/update.rs | grep -oE '[0-9a-f]{64}')
+# From 0.11.1 the owner signs the checksums on his PC (ssh-keygen); 0.11.0
+# and the 0.11.1 changeover also carry the old raw signature 0.11.0 checks.
+if [ "$(printf '%s\n' "$v" 0.11.1 | sort -V | head -n1)" = 0.11.1 ]; then
+  [ -f "$dir/SHA256SUMS.txt.sshsig" ]; ok $? "has SHA256SUMS.txt.sshsig"
+fi
+if [ -f "$dir/SHA256SUMS.txt.sshsig" ]; then
+  tools/verify-release.sh "$dir/SHA256SUMS.txt" "$dir/SHA256SUMS.txt.sshsig" "$v" >/dev/null 2>&1
+  ok $? "checksums are signed with the owner's key and name $v"
+fi
+if [ -f "$dir/SHA256SUMS.txt.sig" ]; then
+  pub=565816b56df7a234d2f6ff1eeaeee1fba5ab334d8f69dd813938b7b01329eebe  # the key 0.11.0 carries
   printf '302a300506032b6570032100%s' "$pub" | sed 's/../\\x&/g' | xargs -0 printf '%b' > "$dir/pub.der"
   tr -d '\n' < "$dir/SHA256SUMS.txt.sig" | sed 's/../\\x&/g' | xargs -0 printf '%b' > "$dir/sig.bin"
   openssl pkeyutl -verify -pubin -keyform DER -inkey "$dir/pub.der" -rawin -in "$dir/SHA256SUMS.txt" -sigfile "$dir/sig.bin" >/dev/null 2>&1
-  ok $? "checksums are signed with the release key"
+  ok $? "old-format signature (for 0.11.0 copies) checks out"
 fi
 list=$(unzip -Z1 "$dir/TUFFcord-$tag-windows.zip" 2>/dev/null)
 grep -qx TUFFcord/TUFFcord.exe <<<"$list" && grep -qx TUFFcord/TUFFcord-server.exe <<<"$list" && grep -qx TUFFcord/README.txt <<<"$list"

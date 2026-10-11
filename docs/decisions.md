@@ -85,3 +85,14 @@ Settled choices and why. Add one when a choice would otherwise be revisited.
   live in the accounts file (no new storage, admin log capped at 200).
   Look-alike names: one alphabet per name. Left out: 2FA, E2E encryption
   (cost over benefit for one friend group).
+- **Owner signs releases on his PC (0.11.1).** `ssh-keygen -Y sign` with a
+  passphrase-protected key (SSHSIG format, checked by `proto/src/sshsig.rs`
+  on top of `ed25519-compact`, no new crate; `-sk` hardware keys work too).
+  GitHub only builds drafts; `publish.yml` checks the pasted signature and
+  publishes. Chosen over GitHub's Approve click because GitHub can't ask for
+  2FA per approval and the key in a GitHub secret was exposed to every build
+  dependency. `SHA256SUMS.txt` starts with `version X.Y.Z` so a signed old
+  release can't pose as a new one; apps check the signature when they find
+  the release, so an unsigned one never shows up. Deleted text channels go to
+  `data/trash` for 30 days (`restore` in the server window). Review:
+  `analysis/security-review-2.md` in the project files.

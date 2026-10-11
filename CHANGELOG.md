@@ -2,6 +2,14 @@
 
 Each version's section becomes the notes on its GitHub release, which the app shows when an update is available.
 
+## 0.11.1
+
+Security update.
+
+- Updates are now signed by the owner on his own computer, with a passphrase, for every release. The signing key is no longer kept on GitHub at all, so neither a stolen GitHub login nor a tampered build tool can sign an update.
+- The app only tells you about an update once its signature checks out. An unsigned release no longer shows a Download button, and an old release can't be passed off as a new one.
+- Deleted text channels go to the server's trash for 30 days instead of being erased, messages and files included. The server window's `trash` and `restore <n>` bring one back.
+
 ## 0.11.0
 
 Security update. Update your server too: the new account features need it.

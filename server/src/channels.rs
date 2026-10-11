@@ -1,7 +1,7 @@
 //! Channels admins add, rename, delete and reorder from the app: checked,
 //! saved to the settings file and sent to everyone signed in.
 
-use crate::{attachments_dir, clean, config, files, leave_voice, State};
+use crate::{clean, config, leave_voice, trash, State};
 use proto::{ChannelRenamed, ServerMsg};
 use std::sync::Arc;
 
@@ -131,8 +131,8 @@ pub fn rename(st: &mut State, conn: u32, name: &str, to: &str, voice: bool) {
     }
 }
 
-/// An admin deleted a channel: a text channel's messages and files go too,
-/// people in a voice channel are moved out of voice.
+/// An admin deleted a channel: a text channel's messages and files go to the
+/// trash (30 days), people in a voice channel are moved out of voice.
 pub fn delete(st: &mut State, conn: u32, name: &str, voice: bool) {
     if !admin(st, conn, "delete channels") {
         return;
@@ -154,25 +154,9 @@ pub fn delete(st: &mut State, conn: u32, name: &str, voice: bool) {
         cfg.text_channels.remove(pos);
         let messages = st.history.remove(name).unwrap_or_default();
         st.history_dirty = true;
-        let (archived, archived_files) = st.archive.remove(name);
-        let dir = attachments_dir(&st.cfg);
-        let mut removed = 0;
-        let ids = messages
-            .iter()
-            .flat_map(|m| &m.attachments)
-            .flat_map(|a| std::iter::once(&a.id).chain(a.poster.as_ref().map(|p| &p.id)))
-            .chain(&archived_files);
-        for id in ids {
-            let freed = files::remove_file(&dir, id);
-            if freed > 0 {
-                removed += 1;
-            }
-            st.files.stored = st.files.stored.saturating_sub(freed);
-        }
-        detail = format!(
-            " ({} message(s), {removed} file(s))",
-            messages.len() + archived
-        );
+        // Kept 30 days in data/trash ("restore" in the server window).
+        let (count, files) = trash::keep(st, name, messages);
+        detail = format!(" ({count} message(s), {files} file(s); in the trash for 30 days)");
     }
     save(st, voice);
     admin_log!(
@@ -307,6 +291,12 @@ fn save(st: &State, voice: bool) {
             "{env} is set, so the channel list in the settings file is ignored; the change is gone after a restart"
         );
     }
+}
+
+/// The text channel list changed outside the app (a restore): save and tell everyone.
+pub(crate) fn saved_and_sent(st: &State) {
+    save(st, false);
+    send_lists(st, None);
 }
 
 fn send_lists(st: &State, renamed: Option<ChannelRenamed>) {

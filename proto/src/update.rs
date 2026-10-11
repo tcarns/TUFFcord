@@ -35,6 +35,8 @@ pub struct Release {
     pub notes: String,
     /// Files attached to the release (the zip, the raw .exe files, SHA256SUMS.txt).
     pub assets: Vec<Asset>,
+    /// Its checksum file, once the signature has been checked ([`check`] does).
+    pub sums: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -71,26 +73,21 @@ pub fn agent(timeout: Duration) -> ureq::Agent {
         .into()
 }
 
-/// The checksum file every release carries.
+/// The checksum file every release carries. Its first line is `version X.Y.Z`
+/// (from 0.11.1), so a signed file can't be passed off as another release.
 pub const SUMS_FILE: &str = "SHA256SUMS.txt";
-/// Its Ed25519 signature (hex), made by the release workflow with a key kept
-/// in GitHub's "release" environment. A checksum only proves a download is
-/// whole; the signature proves the release came from us.
-pub const SIG_FILE: &str = "SHA256SUMS.txt.sig";
-/// The public half of the release key.
-const RELEASE_KEY: &str = "565816b56df7a234d2f6ff1eeaeee1fba5ab334d8f69dd813938b7b01329eebe";
-
-fn hex_bytes<const N: usize>(s: &str) -> Option<[u8; N]> {
-    let s = s.trim();
-    if s.len() != N * 2 || !s.is_ascii() {
-        return None;
-    }
-    let mut out = [0u8; N];
-    for (i, b) in out.iter_mut().enumerate() {
-        *b = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16).ok()?;
-    }
-    Some(out)
-}
+/// Its signature, made by the owner on his own PC with `ssh-keygen -Y sign`
+/// (`tools/sign-release.ps1`); the key never goes near GitHub. A checksum only
+/// proves a download is whole; the signature proves the release came from us.
+pub const SIG_FILE: &str = "SHA256SUMS.txt.sshsig";
+/// What copies up to 0.11.0 check instead (a raw Ed25519 signature made by
+/// the release workflow with an older key).
+pub const OLD_SIG_FILE: &str = "SHA256SUMS.txt.sig";
+/// `ssh-keygen -Y sign -n`: a release signature can't be reused for anything else.
+pub const SIG_NAMESPACE: &str = "tuffcord-release";
+/// The public half of the owner's signing key (`tuffcord-sign.pub`).
+const RELEASE_KEY: &str =
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGTmSrl747wqhkZKo97lxUOfKbbAg884w2KPc3AvdVp4 tuffcord-sign";
 
 /// The key releases must be signed with. Tests that serve their own releases
 /// (`BACKROOM_UPDATE_URL`) may bring their own key.
@@ -104,14 +101,61 @@ fn release_key() -> String {
     }
 }
 
-/// True if `sig_hex` is the release key's signature of `sums`.
-pub fn signed_by(key_hex: &str, sums: &[u8], sig_hex: &str) -> bool {
-    let (Some(key), Some(sig)) = (hex_bytes::<32>(key_hex), hex_bytes::<64>(sig_hex)) else {
-        return false;
+/// The version a checksum file says it belongs to.
+pub fn sums_version(sums: &str) -> Option<&str> {
+    sums.lines()
+        .find_map(|l| l.trim().strip_prefix("version "))
+        .map(str::trim)
+}
+
+/// True if `sig` is the release key's signature of `sums`, and `sums` says it
+/// belongs to `version`.
+pub fn signed_for(sums: &str, sig: &str, version: &str) -> bool {
+    signed_with(&release_key(), sums, sig, version)
+}
+
+fn signed_with(key: &str, sums: &str, sig: &str, version: &str) -> bool {
+    crate::sshsig::verify(key, SIG_NAMESPACE, sums.as_bytes(), sig)
+        && sums_version(sums).is_some_and(|v| v.trim_start_matches(['v', 'V']) == version)
+}
+
+/// Fetch `release`'s checksums and signature and check them. Returns the
+/// checksums, or why the release can't be trusted.
+fn verified_sums(agent: &ureq::Agent, release: &Release, current: &str) -> Result<String, String> {
+    let fetch = |name: &str, limit: u64| -> Result<String, String> {
+        let asset = release.asset(name).ok_or("missing")?;
+        let mut resp = agent
+            .get(&asset.url)
+            .header("User-Agent", &format!("TUFFcord/{current}"))
+            .call()
+            .map_err(|e| format!("couldn't reach GitHub ({e})"))?;
+        if resp.status().as_u16() != 200 {
+            return Err(format!(
+                "GitHub answered with an error ({})",
+                resp.status().as_u16()
+            ));
+        }
+        resp.body_mut()
+            .with_config()
+            .limit(limit)
+            .read_to_string()
+            .map_err(|e| format!("couldn't read {name} ({e})"))
     };
-    let key = ed25519_compact::PublicKey::new(key);
-    key.verify(sums, &ed25519_compact::Signature::new(sig))
-        .is_ok()
+    let unsigned = || {
+        format!(
+            "TUFFcord {} is out, but it isn't signed with TUFFcord's release key, so it was ignored.",
+            release.version
+        )
+    };
+    let (sums, sig) = match (fetch(SUMS_FILE, 64 * 1024), fetch(SIG_FILE, 4096)) {
+        (Ok(a), Ok(b)) => (a, b),
+        (Err(e), _) | (_, Err(e)) if e != "missing" => return Err(e),
+        _ => return Err(unsigned()),
+    };
+    if !signed_for(&sums, &sig, &release.version) {
+        return Err(unsigned());
+    }
+    Ok(sums)
 }
 const MAX_DOWNLOAD: u64 = 200 * 1024 * 1024;
 
@@ -180,7 +224,13 @@ pub fn check_against(current: &str) -> Result<Option<Release>, String> {
         .body_mut()
         .read_to_string()
         .map_err(|e| format!("couldn't read GitHub's answer ({e})"))?;
-    parse_release(&body, current)
+    let Some(mut release) = parse_release(&body, current)? else {
+        return Ok(None);
+    };
+    // Only a release signed with our key is offered at all, so a stranger who
+    // got into the GitHub account can't put a "Download" button in every app.
+    release.sums = verified_sums(&agent, &release, current)?;
+    Ok(Some(release))
 }
 
 pub fn parse_release(json: &str, current: &str) -> Result<Option<Release>, String> {
@@ -223,19 +273,18 @@ pub fn parse_release(json: &str, current: &str) -> Result<Option<Release>, Strin
                     .collect()
             })
             .unwrap_or_default(),
+        sums: String::new(),
     }))
 }
 
-/// True if `release` has `asset`, a checksum file and its signature, so it can
-/// be installed automatically.
+/// True if `release` has `asset` and its signature checked out, so it can be
+/// installed automatically.
 pub fn installable(release: &Release, asset: &str) -> bool {
-    release.asset(asset).is_some()
-        && release.asset(SUMS_FILE).is_some()
-        && release.asset(SIG_FILE).is_some()
+    release.asset(asset).is_some() && !release.sums.is_empty()
 }
 
 /// Download `asset` from `release` next to `exe` and check it against the
-/// release's checksums. Returns the verified file (`<exe>.download`), ready for
+/// release's signed checksums (fetched and checked by [`check`]). Returns the verified file (`<exe>.download`), ready for
 /// [`install`]. `progress` gets (bytes so far, total) every so often.
 pub fn download_verified(
     release: &Release,
@@ -246,58 +295,17 @@ pub fn download_verified(
     let file_asset = release
         .asset(asset)
         .ok_or_else(|| format!("This release doesn't include {asset}."))?;
-    let sums = release
-        .asset(SUMS_FILE)
-        .ok_or("This release has no checksum file, so it can't be installed safely.")?;
+    if release.sums.is_empty() {
+        return Err("This release isn't signed, so it can't be installed safely.".into());
+    }
     let dir = exe
         .parent()
         .ok_or("Couldn't find the program's folder.")?
         .to_path_buf();
     let agent = agent(Duration::from_secs(600));
     let user_agent = format!("TUFFcord/{CURRENT}");
-
-    // Expected checksum.
-    let mut resp = agent
-        .get(&sums.url)
-        .header("User-Agent", &user_agent)
-        .call()
-        .map_err(|e| format!("Couldn't reach GitHub ({e})."))?;
-    if resp.status().as_u16() != 200 {
-        return Err(format!(
-            "GitHub answered with an error ({}).",
-            resp.status().as_u16()
-        ));
-    }
-    let sums_text = resp
-        .body_mut()
-        .with_config()
-        .limit(64 * 1024)
-        .read_to_string()
-        .map_err(|e| format!("Couldn't read the checksum file ({e})."))?;
-    let sig = release
-        .asset(SIG_FILE)
-        .ok_or("This release isn't signed, so it can't be installed safely.")?;
-    let mut resp = agent
-        .get(&sig.url)
-        .header("User-Agent", &user_agent)
-        .call()
-        .map_err(|e| format!("Couldn't reach GitHub ({e})."))?;
-    if resp.status().as_u16() != 200 {
-        return Err(format!(
-            "GitHub answered with an error ({}).",
-            resp.status().as_u16()
-        ));
-    }
-    let sig_text = resp
-        .body_mut()
-        .with_config()
-        .limit(1024)
-        .read_to_string()
-        .map_err(|e| format!("Couldn't read the signature ({e})."))?;
-    if !signed_by(&release_key(), sums_text.as_bytes(), &sig_text) {
-        return Err("This release isn't signed with TUFFcord's release key, so it wasn't installed. Nothing was changed.".into());
-    }
-    let expected = expected_hash(&sums_text, asset)
+    let sums_text = &release.sums;
+    let expected = expected_hash(sums_text, asset)
         .ok_or_else(|| format!("The checksum file doesn't list {asset}."))?;
 
     // Download next to the running program, so the final move stays on the same drive.
@@ -549,25 +557,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn signatures() {
-        // A throwaway key: openssl genpkey -algorithm ed25519; pkeyutl -sign -rawin.
-        let key = "7bf0a346cca4bbe27770b779390d31711417a824ad392dd40ab13582f9b5297f";
-        let sig = "73a6ca31a1bfac26757c703ad41369278109068b432b0c995fae108c3a29fd2c2200f723887f18cca32cf1c359ae0b4e51186799925cf977ca89485b8f07a10d";
-        let sums = b"abc  TUFFcord.exe\n";
-        assert!(signed_by(key, sums, sig));
+    fn signatures_name_their_version() {
+        // A test key and signature (ssh-keygen -Y sign -n tuffcord-release).
+        let key =
+            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHJId6PrhlnyAWbYEcm1FG7SMokqQauHNvmWGen8GUwT test";
+        let sums = "version 1.2.3\nabc  TUFFcord.exe\n";
+        let sig = "-----BEGIN SSH SIGNATURE-----
+U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgckh3o+uGWfIBZtgRybUUbtIyiS
+pBq4c2+ZYZ6fwZTBMAAAAQdHVmZmNvcmQtcmVsZWFzZQAAAAAAAAAGc2hhNTEyAAAAUwAA
+AAtzc2gtZWQyNTUxOQAAAECWQxNlhxfAIxJVsOxHZGtrvKeWlFWE0007sKxwmUd4fihIfa
+knCwr3WUNWQFvwPM5Y2wFCkuFCmwQCsNYSBUkJ
+-----END SSH SIGNATURE-----";
+        assert!(signed_with(key, sums, sig, "1.2.3"));
         assert!(
-            signed_by(key, sums, &format!("{sig}\n")),
-            "a line break after it is fine"
+            !signed_with(key, sums, sig, "1.3.0"),
+            "an older release passed off as a newer one"
         );
-        assert!(!signed_by(key, b"abd  TUFFcord.exe\n", sig), "changed sums");
-        assert!(!signed_by(RELEASE_KEY, sums, sig), "another key");
-        assert!(!signed_by(key, b"x", "00"), "short signature");
-        assert!(!signed_by("zz", b"x", &"0".repeat(128)), "bad key");
-        assert!(
-            !signed_by(RELEASE_KEY, b"sums", &"0".repeat(128)),
-            "wrong signature"
-        );
+        assert_eq!(sums_version(sums), Some("1.2.3"));
+        assert_eq!(sums_version("abc  x.exe\n"), None);
+        // Copies up to 0.11.0 skip the version line when looking up a hash.
+        assert!(expected_hash(sums, "version").is_none());
     }
+
     #[test]
     fn finds_hashes() {
         let sums = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  backroom.exe\nFEDCBA9876543210FEDCBA9876543210FEDCBA9876543210FEDCBA9876543210 *backroom-server.exe\n";

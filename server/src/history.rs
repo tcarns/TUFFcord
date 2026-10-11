@@ -238,45 +238,53 @@ impl Archive {
         };
         let mut ids = HashSet::new();
         for ch in channels {
-            let path = archive.path(ch);
-            let mut offsets = vec![0u64];
-            if let Ok(file) = std::fs::File::open(&path) {
-                let mut reader = std::io::BufReader::new(file);
-                let mut line = Vec::new();
-                let mut pos = 0u64;
-                loop {
-                    line.clear();
-                    let n = match reader.read_until(b'\n', &mut line) {
-                        Ok(0) => break,
-                        Ok(n) => n as u64,
-                        Err(e) => {
-                            error!("chat", "Reading {} failed: {e}", path.display());
-                            break;
-                        }
-                    };
-                    if line.last() != Some(&b'\n') {
-                        // Cut short (the server stopped mid-write): drop the partial line.
-                        let _ = std::fs::OpenOptions::new()
-                            .write(true)
-                            .open(&path)
-                            .and_then(|f| f.set_len(pos));
-                        break;
-                    }
-                    pos += n;
-                    offsets.push(pos);
-                    if let Ok(m) = serde_json::from_slice::<ChatMessage>(&line) {
-                        archive.add_files(ch, &m, Some(&attachments));
-                        ids.insert(m.id);
-                    }
-                }
-            }
-            archive.lines.insert(ch.clone(), offsets);
+            ids.extend(archive.index(ch, &attachments));
         }
         let count: usize = archive.lines.values().map(|o| o.len() - 1).sum();
         if count > 0 {
             info!("chat", "{count} older message(s) in data/history");
         }
         (archive, ids)
+    }
+
+    /// Read where every line of `ch`'s file starts and which files its
+    /// messages have. Returns the message ids.
+    fn index(&mut self, ch: &str, attachments: &Path) -> HashSet<String> {
+        let mut ids = HashSet::new();
+        let path = self.path(ch);
+        let mut offsets = vec![0u64];
+        if let Ok(file) = std::fs::File::open(&path) {
+            let mut reader = std::io::BufReader::new(file);
+            let mut line = Vec::new();
+            let mut pos = 0u64;
+            loop {
+                line.clear();
+                let n = match reader.read_until(b'\n', &mut line) {
+                    Ok(0) => break,
+                    Ok(n) => n as u64,
+                    Err(e) => {
+                        error!("chat", "Reading {} failed: {e}", path.display());
+                        break;
+                    }
+                };
+                if line.last() != Some(&b'\n') {
+                    // Cut short (the server stopped mid-write): drop the partial line.
+                    let _ = std::fs::OpenOptions::new()
+                        .write(true)
+                        .open(&path)
+                        .and_then(|f| f.set_len(pos));
+                    break;
+                }
+                pos += n;
+                offsets.push(pos);
+                if let Ok(m) = serde_json::from_slice::<ChatMessage>(&line) {
+                    self.add_files(ch, &m, Some(attachments));
+                    ids.insert(m.id);
+                }
+            }
+        }
+        self.lines.insert(ch.to_string(), offsets);
+        ids
     }
 
     fn path(&self, channel: &str) -> PathBuf {
@@ -449,9 +457,15 @@ impl Archive {
         }
     }
 
-    /// A text channel was deleted. Returns its archived message count and files.
-    pub fn remove(&mut self, channel: &str) -> (usize, Vec<String>) {
-        let _ = std::fs::remove_file(self.path(channel));
+    /// A text channel was deleted: move its file to `to` (the trash) and forget
+    /// it. Returns its archived message count and files.
+    pub fn take(&mut self, channel: &str, to: &Path) -> (usize, Vec<String>) {
+        let from = self.path(channel);
+        if from.exists() {
+            if let Err(e) = std::fs::rename(&from, to) {
+                error!("chat", "Moving {} to the trash failed: {e}", from.display());
+            }
+        }
         let count = self.lines.remove(channel).map_or(0, |o| o.len() - 1);
         let ids: Vec<String> = self
             .files
@@ -463,6 +477,19 @@ impl Archive {
             self.files.remove(id);
         }
         (count, ids)
+    }
+
+    /// Bring back a channel's messages moved away by [`Archive::take`].
+    /// Returns how many there are.
+    pub fn put_back(
+        &mut self,
+        channel: &str,
+        from: &Path,
+        attachments: &Path,
+    ) -> std::io::Result<usize> {
+        std::fs::create_dir_all(&self.dir)?;
+        std::fs::rename(from, self.path(channel))?;
+        Ok(self.index(channel, attachments).len())
     }
 
     /// The oldest archived message that still has files: (time, message id).
@@ -490,7 +517,7 @@ impl Archive {
 
 /// A channel name as a file name: letters, digits, `-` and `_` as they are,
 /// anything else as `%xx` bytes.
-fn file_name(channel: &str) -> String {
+pub(crate) fn file_name(channel: &str) -> String {
     let mut out = String::new();
     for b in channel.bytes() {
         if b.is_ascii_alphanumeric() || b == b'-' || b == b'_' {
@@ -561,7 +588,11 @@ mod tests {
         a = b;
         a.rename("a b", "c");
         assert_eq!(a.page("c", None).0[0].channel, "c");
-        assert_eq!(a.remove("c").0, 1);
+        let away = dir.join("c-away.jsonl");
+        assert_eq!(a.take("c", &away).0, 1);
+        assert!(a.page("c", None).0.is_empty() && away.exists());
+        assert_eq!(a.put_back("c", &away, &dir).unwrap(), 1);
+        assert_eq!(a.page("c", None).0[0].id, "x");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -1,63 +1,78 @@
 # Releasing
 
 Pushing a higher `version` in `Cargo.toml` to main starts the Release
-workflow (`.github/workflows/release.yml`). From 0.11 it runs in the GitHub
-environment **release**, which holds the signing key and waits for the owner
-to approve each release.
+workflow (`.github/workflows/release.yml`). It tests and builds everything and
+puts it in a **draft** release. Nothing reaches anyone until the owner signs
+the draft on his own PC and runs the **Publish release** workflow with the
+signature (`.github/workflows/publish.yml`).
 
 ## Why
 
-Apps and servers from 0.11 install an update only if `SHA256SUMS.txt` is
-signed with the release key (Ed25519; public half in `proto/src/update.rs`,
-`RELEASE_KEY`). A stolen GitHub token can't read the key, and a push to main
-can't publish without the owner's Approve click. Servers also wait a day
-before installing a release by themselves (typing `update` installs at once),
-so a bad release can be pulled first.
+Apps and servers from 0.11.1 offer and install an update only if its
+`SHA256SUMS.txt` is signed with the owner's key (`ssh-keygen -Y sign`, public
+half in `RELEASE_KEY` in `proto/src/update.rs`) and the file's first line
+names that version. The private key and its passphrase stay on the owner's
+PC, so neither a stolen GitHub login nor a compromised build dependency can
+sign a release, and an old release can't be passed off as a new one. Servers
+still wait a day before installing a release by themselves (typing `update`
+installs at once), so a bad release can be pulled first.
 
-## One-time setup (owner)
+## One-time setup (owner, done 2026-10-11)
 
-Make the key on your own PC, in **PowerShell** (OpenSSH ships with Windows):
+In **PowerShell**:
 
 ```
-ssh-keygen -t ed25519 -C tuffcord-release -f $HOME\tuffcord-release
-type $HOME\tuffcord-release.pub
+ssh-keygen -t ed25519 -C tuffcord-sign -f $HOME\tuffcord-sign
 ```
 
-Press Enter twice at the passphrase prompts (the workflow can't type one;
-the GitHub secret and the approval step are what protect it). The second line
-prints the public half, `ssh-ed25519 AAAA… tuffcord-release`; its last 32
-bytes in hex go into `RELEASE_KEY` in `proto/src/update.rs`
-(`python3 tools/release-key.py < tuffcord-release` prints that hex too). The
-private key never leaves your PC except into GitHub's secret below. Then in
-GitHub's website:
+with a passphrase. The `ssh-ed25519 …` line from `tuffcord-sign.pub` is
+`RELEASE_KEY`. Back up `tuffcord-sign` somewhere offline (a password manager
+or a USB stick); without it, the next update has to be installed by hand on
+every PC and server.
 
-1. Repository → **Settings** → **Environments** → **New environment**, name
-   it `release`.
-2. Tick **Required reviewers**, add yourself, **Save protection rules**.
-3. Under **Deployment branches and tags** choose **Selected branches and
-   tags** and add `main`.
-4. **Add environment secret**: name `RELEASE_SIGNING_KEY`, value: the whole
-   private key file `tuffcord-release` (`-----BEGIN OPENSSH PRIVATE KEY-----`
-   to `-----END OPENSSH PRIVATE KEY-----`; a PEM key works too).
-5. Keep `tuffcord-release` somewhere safe and offline (a password manager)
-   and delete other copies. Without it, a lost secret means a new key, and every app and
-   server would have to be updated by hand once.
+A hardware key works too: `ssh-keygen -t ed25519-sk` (needs OpenSSH 8.2+; a
+YubiKey or similar), and every signature then needs a tap on the key.
 
 ## Each release
 
-1. Bump the version, add the `CHANGELOG.md` section, push to main.
-2. GitHub emails "Review pending deployments" (or see the Actions tab). Open
-   the Release run → **Review deployments** → tick `release` → **Approve and
-   deploy**. Works from the GitHub phone app too.
-3. `tools/release-check.sh` checks the files, checksums and the signature.
+1. Bump the version, add the `CHANGELOG.md` section, push to main. The
+   Release workflow runs (~15 minutes) and leaves a draft.
+2. On GitHub, **Releases** → the draft → download **SHA256SUMS.txt** (to
+   Downloads; delete older copies there first so the name stays exact).
+3. In PowerShell, sign it and copy the signature:
 
-If the secret is missing the run stops at "Sign the checksums" and nothing is
-published.
+   ```
+   ssh-keygen -Y sign -f $HOME\tuffcord-sign -n tuffcord-release $HOME\Downloads\SHA256SUMS.txt
+   Get-Content $HOME\Downloads\SHA256SUMS.txt.sig | Set-Clipboard
+   ```
+
+   It asks for your passphrase. If it says `unknown option -- Y`, Windows'
+   OpenSSH is too old; use Git's instead:
+   `& "C:\Program Files\Git\usr\bin\ssh-keygen.exe" -Y sign ...` (same rest).
+4. GitHub → **Actions** → **Publish release** → **Run workflow**: type the
+   version (e.g. `0.11.1`), paste into *signature* (it's fine that the line
+   breaks disappear), **Run workflow**. It checks the signature and the
+   version line, attaches the signature and publishes. A wrong file or
+   passphrase-less key just fails there; nothing is published.
+5. `tools/release-check.sh` checks files, checksums, the signature and
+   `--version`.
+
+To throw a draft away (e.g. to rebuild it), delete it on the Releases page
+and push again or run the Release workflow by hand.
+
+## Changeover (0.11.1 only)
+
+Copies up to 0.11.0 only accept the old raw signature made by the release
+workflow with `RELEASE_SIGNING_KEY` (GitHub environment `release`). So for
+0.11.1 the workflow's `old-sign` job still makes that signature (it waits for
+the Approve click as before, and sees nothing but `SHA256SUMS.txt`). After
+0.11.1 is out: delete the `old-sign` job and the `RELEASE_SIGNING_KEY`
+secret. Anyone still on 0.11.0 or older after that downloads the new version
+from the releases page once.
 
 ## A new key (lost or leaked)
 
-1. Make a new key as in the one-time setup.
-2. Put its public half in `RELEASE_KEY` in `proto/src/update.rs`, replace
-   the environment secret, release. Copies that carry the old key refuse this
-   release: people download it once from the releases page (servers: replace
-   the program by hand).
+Make a new key as above, put its public half in `RELEASE_KEY`, release, and
+sign with the new key. Copies carrying the old key refuse that release:
+people download it once from the releases page (servers: replace the program
+by hand). From then on updates work as before.

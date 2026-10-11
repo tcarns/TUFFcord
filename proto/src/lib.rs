@@ -821,3 +821,6 @@ mod tests {
 
 #[cfg(feature = "updates")]
 pub mod update;
+
+#[cfg(feature = "updates")]
+pub mod sshsig;

@@ -2,15 +2,20 @@
 
 Where things stand. Rewrite (don't append) at the end of each working session.
 
-**Last updated:** 2026-10-11. **Released:** 0.11.0 (app and server).
+**Last updated:** 2026-10-11. **Released:** 0.11.0; 0.11.1 built as a draft, waiting for the owner's signature.
 
 ## Waiting on the owner
 - Rented server deferred (2026-10-11): development continues against his home
   Windows server. When he's ready he follows `docs/hosting.md`; `install.sh`
   hasn't run on a real VPS yet.
-- Each release now waits for his Approve click (GitHub environment `release`,
-  `docs/releasing.md`). His key lives on his PC and in the environment secret
-  only; the public half is `RELEASE_KEY` in `proto/src/update.rs`.
+- From 0.11.1 he signs every release on his PC (`ssh-keygen -Y sign`,
+  passphrase) and runs the Publish release workflow (`docs/releasing.md`).
+  Key `tuffcord-sign` is on his PC only; public half is `RELEASE_KEY` in
+  `proto/src/update.rs`. 0.11.1 also needs his Approve click once more
+  (changeover signature for 0.11.0 copies).
+- After 0.11.1 is published: delete the `old-sign` job from `release.yml`
+  (and make `draft` stop needing it) and ask him to delete the
+  `RELEASE_SIGNING_KEY` secret.
 
 ## Security pass (0.10.1 and 0.11.0)
 Report with every finding: `analysis/security-review.md` in the project files.
@@ -28,7 +33,14 @@ Report with every finding: `analysis/security-review.md` in the project files.
   on the sign-in screen. Checked: `tests/test_security.py` (19), selfupdate
   suite (other-key release refused), all suites, Wine screenshots of the
   Account page; DPAPI round trip worked under Wine.
-- Still open from the report ("later"): nothing scheduled. Left out on
+- Second review (`analysis/security-review-2.md`): #1-#4 and #3 done in 0.11.1
+  (local signing, signature checked when an update is found, version line in
+  `SHA256SUMS.txt`, deleted text channels go to `data/trash` for 30 days,
+  `trash` / `restore <n>` in the server window). Open, low: #5-#11 (old
+  plain-text sign-ins, IPv6 /64 limits, 17 MB pre-sign-in messages,
+  token new-address notice, admin log size, `-ms` extensions, `con`/`nul`
+  channel names).
+- Still open from the first report ("later"): nothing scheduled. Left out on
   purpose: 2FA, E2E encryption, fail2ban (see `docs/decisions.md`).
 - 0.10.x copies have no key check and install 0.11.0 normally; from 0.11.0 on
   every update must be signed.
