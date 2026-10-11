@@ -24,6 +24,26 @@ const MAX_TOKENS: usize = 10;
 struct FileData {
     next_id: u32,
     accounts: Vec<Account>,
+    /// One-time invites admins made (see `invites.rs`).
+    invites: Vec<Invite>,
+    /// Recent admin actions, newest last (see `adminlog.rs`).
+    admin_log: Vec<LogEntry>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Invite {
+    /// SHA-256 of the code (the code itself is only shown to the admin once).
+    pub hash: String,
+    pub by: u32,
+    pub expires: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct LogEntry {
+    pub ts: u64,
+    pub text: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -51,6 +71,9 @@ pub struct Account {
     pub last_ip: String,
     #[serde(default)]
     pub tokens: Vec<Token>,
+    /// "New sign-in from ..." notes not yet shown on another of their devices.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notices: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -60,6 +83,9 @@ pub struct Token {
     pub hash: String,
     pub created: u64,
     pub last_used: u64,
+    /// Address it was last used from (for the devices list).
+    #[serde(default)]
+    pub ip: String,
 }
 
 pub struct Store {
@@ -94,10 +120,30 @@ pub fn clean_name(raw: &str) -> Result<String, String> {
     if !name.chars().any(char::is_alphanumeric) {
         return Err("Names need at least one letter or number.".into());
     }
+    if mixed_scripts(&name) {
+        return Err(
+            "Names can't mix alphabets (like Latin and Cyrillic letters that look alike).".into(),
+        );
+    }
     Ok(name)
 }
 
 /// Names match regardless of upper/lower case.
+/// Letters from more than one of Latin, Greek and Cyrillic: how look-alike
+/// names are made ("Tyler" with a Cyrillic "е").
+fn mixed_scripts(name: &str) -> bool {
+    let mut seen = [false; 3];
+    for c in name.chars().filter(|c| c.is_alphabetic()) {
+        match c as u32 {
+            0x41..=0x5A | 0x61..=0x7A | 0xC0..=0x24F | 0x1E00..=0x1EFF => seen[0] = true,
+            0x370..=0x3FF | 0x1F00..=0x1FFF => seen[1] = true,
+            0x400..=0x52F => seen[2] = true,
+            _ => {}
+        }
+    }
+    seen.iter().filter(|s| **s).count() > 1
+}
+
 fn same_name(a: &str, b: &str) -> bool {
     a.to_lowercase() == b.to_lowercase()
 }
@@ -297,6 +343,7 @@ impl Store {
             last_seen: now,
             last_ip: ip.to_string(),
             tokens: Vec::new(),
+            notices: Vec::new(),
         });
         id
     }
@@ -307,7 +354,7 @@ impl Store {
     }
 
     /// Hand out a new saved sign-in for this account. Returns the token to give the app.
-    pub fn issue_token(&mut self, id: u32, now: u64) -> Option<(String, String)> {
+    pub fn issue_token(&mut self, id: u32, now: u64, ip: &str) -> Option<(String, String)> {
         let a = self.get_mut(id)?;
         let (token, hash) = new_token();
         a.tokens
@@ -316,6 +363,7 @@ impl Store {
             hash: hash.clone(),
             created: now,
             last_used: now,
+            ip: ip.to_string(),
         });
         if a.tokens.len() > MAX_TOKENS {
             a.tokens.sort_by_key(|t| std::cmp::Reverse(t.last_used));
@@ -325,7 +373,7 @@ impl Store {
     }
 
     /// The account a saved sign-in belongs to, if it's still good.
-    pub fn use_token(&mut self, hash: &str, now: u64) -> Option<u32> {
+    pub fn use_token(&mut self, hash: &str, now: u64, ip: &str) -> Option<u32> {
         for a in &mut self.data.accounts {
             if let Some(t) = a.tokens.iter_mut().find(|t| t.hash == hash) {
                 if now.saturating_sub(t.last_used) >= TOKEN_LIFETIME_MS {
@@ -334,11 +382,20 @@ impl Store {
                     return None;
                 }
                 t.last_used = now;
+                t.ip = ip.to_string();
                 self.dirty = true;
                 return Some(a.id);
             }
         }
         None
+    }
+
+    pub fn invites(&mut self) -> &mut Vec<Invite> {
+        &mut self.data.invites
+    }
+
+    pub fn admin_log(&mut self) -> &mut Vec<LogEntry> {
+        &mut self.data.admin_log
     }
 
     pub fn revoke_token(&mut self, hash: &str) {
@@ -362,6 +419,15 @@ mod tests {
         assert!(clean_name("tab\there").is_ok()); // whitespace collapses to a space
         assert!(clean_name("no<html>").is_err());
         assert!(clean_name(&"x".repeat(33)).is_err());
+        assert!(
+            clean_name("Tyl\u{0435}r").is_err(),
+            "Cyrillic e in a Latin name"
+        );
+        assert!(
+            clean_name("\u{0418}\u{0432}\u{0430}\u{043d}").is_ok(),
+            "all Cyrillic is fine"
+        );
+        assert!(clean_name("Zoë 2").is_ok());
         assert!(check_password("1234567").is_err());
         assert!(check_password("12345678").is_ok());
     }
@@ -391,16 +457,16 @@ mod tests {
         assert!(!s.name_taken("SAM", Some(id)));
         assert_eq!(s.by_name("  SAM ").unwrap().id, id);
 
-        let (tok, hash) = s.issue_token(id, 1000).unwrap();
+        let (tok, hash) = s.issue_token(id, 1000, "").unwrap();
         assert_eq!(token_hash(&tok), hash);
-        assert_eq!(s.use_token(&hash, 2000), Some(id));
-        assert_eq!(s.use_token(&token_hash("nope"), 2000), None);
+        assert_eq!(s.use_token(&hash, 2000, ""), Some(id));
+        assert_eq!(s.use_token(&token_hash("nope"), 2000, ""), None);
         // Expires after going unused for the lifetime.
-        assert_eq!(s.use_token(&hash, 2000 + TOKEN_LIFETIME_MS), None);
-        assert_eq!(s.use_token(&hash, 2000), None);
+        assert_eq!(s.use_token(&hash, 2000 + TOKEN_LIFETIME_MS, ""), None);
+        assert_eq!(s.use_token(&hash, 2000, ""), None);
 
         for i in 0..15 {
-            s.issue_token(id, 3000 + i);
+            s.issue_token(id, 3000 + i, "");
         }
         assert_eq!(s.get(id).unwrap().tokens.len(), MAX_TOKENS);
 

@@ -76,3 +76,12 @@ Settled choices and why. Add one when a choice would otherwise be revisited.
   out). Per-person daily upload cap (3 GB default). VPS Caddyfile drops
   `CF-Connecting-IP` (only the Cloudflare tunnel may set it). Not done: E2E
   encryption, 2FA for all, fail2ban (cost over benefit for one friend group).
+- **Security features (0.11.0).** Signed updates: Ed25519 over
+  `SHA256SUMS.txt` (`ed25519-compact`, no default features, ~20 KB), key in
+  the GitHub environment `release` behind the owner's approval; setup in
+  `docs/releasing.md`. Servers auto-install a release only after it has been
+  out a day. Saved sign-in sealed with Windows DPAPI (`windows-sys`, no new
+  crate). Invites, signed-in devices, new-address notices and the admin log
+  live in the accounts file (no new storage, admin log capped at 200).
+  Look-alike names: one alphabet per name. Left out: 2FA, E2E encryption
+  (cost over benefit for one friend group).

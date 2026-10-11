@@ -23,7 +23,7 @@ pub struct Config {
     pub check_updates: bool,
     /// Install new versions by itself and restart when nobody's in voice.
     pub auto_update: bool,
-    /// New accounts can be created (with the group password).
+    /// The group password creates accounts (invites always can).
     pub allow_signup: bool,
     /// Largest file someone can send.
     pub max_attachment_bytes: u64,
@@ -85,7 +85,9 @@ fn default_file(password: &str) -> String {
 # the address create an account.
 password = "{password}"
 
-# Set to false to stop new accounts being created (once everyone has one).
+# Set to false to stop the group password creating accounts (once everyone has
+# one). Admins can still invite someone: an invite (made in the app) creates one
+# account and works for a week.
 allow_signup = true
 
 port = 3000
@@ -120,7 +122,7 @@ log_file = "data/TUFFcord.log"
 # Check GitHub for a newer TUFFcord.
 check_updates = true
 
-# Install new versions by itself, then restart once nobody is in voice (people
+# Install new versions by itself (a day after they come out), then restart once nobody is in voice (people
 # reconnect on their own). Set to false to just be told, then type "update" to install.
 auto_update = true
 "#

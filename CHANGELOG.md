@@ -2,6 +2,19 @@
 
 Each version's section becomes the notes on its GitHub release, which the app shows when an update is available.
 
+## 0.11.0
+
+Security update. Update your server too: the new account features need it.
+
+- Updates are signed. The app and the server install an update only if it carries TUFFcord's signature, so a stolen GitHub login can't push a bad update to everyone. Servers also wait a day before installing an update by themselves (type `update` in the server window to install at once).
+- Your saved sign-in is locked to your Windows account, so another program or person copying your settings file can't use it to sign in as you.
+- Admins can make one-time invites (Settings > Account > Invites). An invite creates one account in place of the group password and works for a week, even with sign-ups closed.
+- Settings > Account lists where you're signed in, with a Sign out button for each device and "Sign out everywhere else".
+- When your account signs in from a new address, your other devices show a notice (or the next one to connect does).
+- Admins can see what admins did recently (kicks, bans, password resets, channel and invite changes) under Settings > Account > Admin log.
+- Names that mix alphabets (a "Tyler" with a Cyrillic e) are refused, so nobody can pose as someone else.
+- The sign-in screen warns when a server on the internet is reached without encryption.
+
 ## 0.10.1
 
 Security update. Update your server too: most of the protection is in it.

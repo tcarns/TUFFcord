@@ -5,11 +5,11 @@
 //! with the state unlocked; voice keeps flowing for everyone meanwhile.
 
 use crate::accounts::{self, Store};
-use crate::{config, leave_voice, limits, now_ms, Shared, State};
-use proto::{Account, AccountSummary, AdminAction, Auth, Member, ServerMsg, FEATURE_ACCOUNTS};
+use crate::{leave_voice, limits, now_ms, Shared, State};
+use proto::{Account, AccountSummary, Auth, Member, ServerMsg, FEATURE_ACCOUNTS};
 use proto::{
-    FEATURE_ATTACHMENTS, FEATURE_CHANNELS, FEATURE_CHANNEL_EDIT, FEATURE_FILES,
-    FEATURE_OLDER_MESSAGES, PROTOCOL_VERSION,
+    FEATURE_ADMIN_LOG, FEATURE_ATTACHMENTS, FEATURE_CHANNELS, FEATURE_CHANNEL_EDIT, FEATURE_FILES,
+    FEATURE_INVITES, FEATURE_OLDER_MESSAGES, FEATURE_SESSIONS, PROTOCOL_VERSION,
 };
 use std::time::{Duration, Instant};
 use tokio_tungstenite::tungstenite::Message;
@@ -17,11 +17,11 @@ use tokio_tungstenite::tungstenite::Message;
 // ---------------------------------------------------------------- helpers on State
 
 impl State {
-    fn account_of(&self, conn: u32) -> Option<u32> {
+    pub(crate) fn account_of(&self, conn: u32) -> Option<u32> {
         self.clients.get(&conn).and_then(|c| c.account)
     }
 
-    fn summaries(&self) -> Vec<AccountSummary> {
+    pub(crate) fn summaries(&self) -> Vec<AccountSummary> {
         let mut list: Vec<AccountSummary> = self
             .accounts
             .all()
@@ -87,7 +87,7 @@ impl State {
 
     /// Send an error and close the connection (after a pause, if `slow`, so
     /// password guessing is slow).
-    fn refuse(&self, conn: u32, code: &str, message: &str, slow: bool) {
+    pub(crate) fn refuse(&self, conn: u32, code: &str, message: &str, slow: bool) {
         let Some(c) = self.clients.get(&conn) else {
             return;
         };
@@ -135,7 +135,7 @@ impl State {
         conns.len()
     }
 
-    fn save_accounts(&mut self) {
+    pub(crate) fn save_accounts(&mut self) {
         if let Err(e) = self.accounts.save() {
             error!("auth", "{e}");
         }
@@ -201,6 +201,9 @@ impl State {
                 FEATURE_CHANNELS.to_string(),
                 FEATURE_CHANNEL_EDIT.to_string(),
                 FEATURE_OLDER_MESSAGES.to_string(),
+                FEATURE_INVITES.to_string(),
+                FEATURE_SESSIONS.to_string(),
+                FEATURE_ADMIN_LOG.to_string(),
             ],
             max_attachment_bytes: self.cfg.max_attachment_bytes,
             account: Some(me),
@@ -294,7 +297,7 @@ pub async fn hello(
         Some(Auth::Token { token }) => {
             let hash = accounts::token_hash(&token);
             let mut st = shared.lock().unwrap();
-            match st.accounts.use_token(&hash, now_ms()) {
+            match st.accounts.use_token(&hash, now_ms(), &ip) {
                 Some(id) if st.accounts.get(id).is_some_and(|a| a.banned) => {
                     st.refuse(
                         conn,
@@ -303,7 +306,10 @@ pub async fn hello(
                         false,
                     );
                 }
-                Some(id) => st.sign_in(conn, id, Some(hash), None, ""),
+                Some(id) => {
+                    st.sign_in(conn, id, Some(hash), None, "");
+                    crate::sessions::deliver_notices(&mut st, conn, id);
+                }
                 None => {
                     debug!(
                         "auth",
@@ -363,7 +369,8 @@ pub async fn hello(
                         );
                         return;
                     }
-                    let (token, hash) = st.accounts.issue_token(id, now_ms()).unwrap();
+                    crate::sessions::note_new_address(&mut st, id, &ip);
+                    let (token, hash) = st.accounts.issue_token(id, now_ms(), &ip).unwrap();
                     st.save_accounts();
                     st.sign_in(conn, id, Some(hash), Some(token), "");
                 }
@@ -392,9 +399,10 @@ async fn register(
     invite: String,
     new_password: String,
 ) {
-    let name = {
+    let (name, by_invite) = {
         let mut st = shared.lock().unwrap();
-        if !st.cfg.allow_signup {
+        let by_invite = crate::invites::valid(&mut st, &invite);
+        if !by_invite && !st.cfg.allow_signup {
             st.refuse(
                 conn,
                 "signup_closed",
@@ -404,16 +412,16 @@ async fn register(
             return;
         }
         let group = st.cfg.password.clone();
-        if !group.is_empty() && !ct_eq(invite.as_bytes(), group.as_bytes()) {
+        if !by_invite && !group.is_empty() && !ct_eq(invite.as_bytes(), group.as_bytes()) {
             warn!(
                 "auth",
-                "Wrong group password from {ip} while creating an account"
+                "Wrong group password or invite from {ip} while creating an account"
             );
             st.failures.record(ip, None);
             st.refuse(
                 conn,
                 "bad_password",
-                "That group password isn't right. Ask whoever runs the server for it.",
+                "That group password or invite isn't right. Ask whoever runs the server for one.",
                 true,
             );
             return;
@@ -440,7 +448,7 @@ async fn register(
                 false,
             );
         }
-        name
+        (name, by_invite)
     };
     let Some(hash) = limits::hash(new_password).await else {
         return;
@@ -455,11 +463,28 @@ async fn register(
             false,
         );
     }
+    let mut how = String::new();
+    if by_invite {
+        let Some(by) = crate::invites::redeem(&mut st, &invite) else {
+            return st.refuse(
+                conn,
+                "bad_password",
+                "That invite was just used. Ask for another.",
+                false,
+            );
+        };
+        let by = st
+            .accounts
+            .get(by)
+            .map(|a| a.name.clone())
+            .unwrap_or_default();
+        how = format!(" with an invite from {by}");
+    }
     let now = now_ms();
     let id = st.accounts.create(&name, hash, ip, now);
-    let (token, token_hash) = st.accounts.issue_token(id, now).unwrap();
+    let (token, token_hash) = st.accounts.issue_token(id, now, ip).unwrap();
     st.save_accounts();
-    info!("auth", "{name} created an account (from {ip})");
+    info!("auth", "{name} created an account{how} (from {ip})");
     st.broadcast_members();
     if st.accounts.admin_count() == 0 && st.accounts.all().len() == 1 {
         warn!(
@@ -600,7 +625,12 @@ pub async fn change_password(shared: &Shared, conn: u32, old: String, new: Strin
         name: a.name.clone(),
         admin: a.admin,
     };
-    let (token, token_hash) = st.accounts.issue_token(account, now).unwrap();
+    let ip = st
+        .clients
+        .get(&conn)
+        .map(|c| c.ip.clone())
+        .unwrap_or_default();
+    let (token, token_hash) = st.accounts.issue_token(account, now, &ip).unwrap();
     st.save_accounts();
     if let Some(c) = st.clients.get_mut(&conn) {
         c.token_hash = Some(token_hash);
@@ -692,349 +722,6 @@ pub fn sign_out(st: &mut State, conn: u32) {
     st.accounts.revoke_token(&hash);
     st.save_accounts();
     debug!("auth", "{} signed out on one device", st.who(conn));
-}
-
-// ---------------------------------------------------------------- admin
-
-/// What an admin (or the server window) can do. `by` is who's doing it, for messages.
-pub enum Act {
-    Kick,
-    Ban,
-    Unban,
-    /// With the new temporary password's hash (hashed off the voice thread).
-    ResetPassword {
-        temp_hash: String,
-    },
-    SetAdmin(bool),
-    Delete,
-}
-
-/// Do `act` to `target`. `actor` is the admin's account (None = the server window).
-pub fn act(
-    st: &mut State,
-    actor: Option<u32>,
-    by: &str,
-    target: u32,
-    act: Act,
-) -> Result<String, String> {
-    let Some(t) = st.accounts.get(target) else {
-        return Err("That account doesn't exist any more.".into());
-    };
-    let name = t.name.clone();
-    let (t_admin, t_banned) = (t.admin, t.banned);
-    let is_self = actor == Some(target);
-    // Admins can't act on each other, so one stolen admin password can't take
-    // the server over: only the owner (and the server window) can.
-    let by_owner = actor.is_none() || actor == st.accounts.owner();
-    if !by_owner && !is_self {
-        if matches!(act, Act::SetAdmin(_)) {
-            return Err("Only the server's owner can give or take admin.".into());
-        }
-        if t_admin && matches!(act, Act::Kick | Act::ResetPassword { .. } | Act::Delete) {
-            return Err(format!(
-                "{name} is an admin. Only the server's owner can do that."
-            ));
-        }
-    }
-    let result = match act {
-        Act::Kick => {
-            if is_self {
-                return Err("You can't kick yourself.".into());
-            }
-            let n = st.disconnect_account(
-                target,
-                "kicked",
-                &format!("{by} removed you from the server. You can sign back in."),
-                None,
-            );
-            if n == 0 {
-                return Err(format!("{name} isn't online."));
-            }
-            warn!("admin", "{by} kicked {name}");
-            format!("Kicked {name}.")
-        }
-        Act::Ban => {
-            if is_self {
-                return Err("You can't ban yourself.".into());
-            }
-            if t_admin {
-                return Err(format!("{name} is an admin. Remove their admin first."));
-            }
-            if t_banned {
-                return Err(format!("{name} is already banned."));
-            }
-            let a = st.accounts.get_mut(target).unwrap();
-            a.banned = true;
-            a.tokens.clear();
-            st.save_accounts();
-            st.disconnect_account(
-                target,
-                "banned",
-                "You've been banned from this server.",
-                None,
-            );
-            warn!("admin", "{by} banned {name}");
-            format!("Banned {name}. They can't sign in or create another account from the same address.")
-        }
-        Act::Unban => {
-            if !t_banned {
-                return Err(format!("{name} isn't banned."));
-            }
-            st.accounts.get_mut(target).unwrap().banned = false;
-            st.save_accounts();
-            warn!("admin", "{by} unbanned {name}");
-            format!("{name} can sign in again.")
-        }
-        Act::ResetPassword { temp_hash } => {
-            if is_self {
-                return Err("Change your own password in Settings instead.".into());
-            }
-            let a = st.accounts.get_mut(target).unwrap();
-            a.password_hash = temp_hash;
-            a.must_change_password = true;
-            a.tokens.clear();
-            st.save_accounts();
-            st.disconnect_account(
-                target,
-                "password_reset",
-                &format!("{by} reset your password. Ask them for your temporary password."),
-                None,
-            );
-            warn!("admin", "{by} reset {name}'s password");
-            format!("{name}'s temporary password is below. Send it to them; they'll pick a new one when they sign in.")
-        }
-        Act::SetAdmin(admin) => {
-            if t_admin == admin {
-                return Err(format!(
-                    "{name} {} an admin.",
-                    if admin { "is already" } else { "isn't" }
-                ));
-            }
-            if !admin && st.accounts.admin_count() == 1 {
-                return Err("There has to be at least one admin.".into());
-            }
-            let a = st.accounts.get_mut(target).unwrap();
-            a.admin = admin;
-            if !admin {
-                a.owner = false;
-            }
-            st.accounts.ensure_owner();
-            st.save_accounts();
-            let me = Account {
-                id: target,
-                name: name.clone(),
-                admin,
-            };
-            let conns: Vec<u32> = st
-                .clients
-                .values()
-                .filter(|c| c.account == Some(target))
-                .map(|c| c.id)
-                .collect();
-            for id in conns {
-                st.clients.get_mut(&id).unwrap().admin = admin;
-                st.send(
-                    id,
-                    &ServerMsg::AccountUpdated {
-                        account: me.clone(),
-                        token: None,
-                    },
-                );
-            }
-            st.broadcast_presence();
-            warn!(
-                "admin",
-                "{by} {} {name}",
-                if admin {
-                    "made an admin of"
-                } else {
-                    "removed admin from"
-                }
-            );
-            if admin {
-                format!("{name} is now an admin.")
-            } else {
-                format!("{name} is no longer an admin.")
-            }
-        }
-        Act::Delete => {
-            if is_self {
-                return Err("You can't delete your own account.".into());
-            }
-            if t_admin && st.accounts.admin_count() == 1 {
-                return Err("That's the only admin. Make someone else an admin first.".into());
-            }
-            st.disconnect_account(target, "session_expired", "Your account was deleted.", None);
-            st.accounts.delete(target);
-            st.accounts.ensure_owner();
-            st.save_accounts();
-            warn!("admin", "{by} deleted {name}'s account");
-            format!("Deleted {name}'s account. The name is free again.")
-        }
-    };
-    st.send_accounts_to_admins();
-    st.broadcast_members();
-    Ok(result)
-}
-
-/// An admin in the app asked for something.
-pub async fn admin(shared: &Shared, conn: u32, action: AdminAction) {
-    let (actor, by) = {
-        let st = shared.lock().unwrap();
-        let Some(actor) = st.account_of(conn) else {
-            return;
-        };
-        // Check the account, not the connection: admin may have just been removed.
-        if !st.accounts.get(actor).is_some_and(|a| a.admin) {
-            st.send(
-                conn,
-                &ServerMsg::Error {
-                    code: "not_admin".into(),
-                    message: "Only admins can do that.".into(),
-                },
-            );
-            return;
-        }
-        (actor, st.who(conn))
-    };
-    let mut secret = None;
-    let (target, act_) = match action {
-        AdminAction::Kick { account } => (account, Act::Kick),
-        AdminAction::Ban { account } => (account, Act::Ban),
-        AdminAction::Unban { account } => (account, Act::Unban),
-        AdminAction::SetAdmin { account, admin } => (account, Act::SetAdmin(admin)),
-        AdminAction::ResetPassword { account } => {
-            let temp = config::random_password();
-            let Some(hash) = limits::hash(temp.clone()).await else {
-                return;
-            };
-            secret = Some(temp);
-            (account, Act::ResetPassword { temp_hash: hash })
-        }
-    };
-    let mut st = shared.lock().unwrap();
-    match act(&mut st, Some(actor), &by, target, act_) {
-        Ok(text) => st.send(conn, &ServerMsg::AdminResult { text, secret }),
-        Err(message) => st.send(
-            conn,
-            &ServerMsg::Error {
-                code: "admin_failed".into(),
-                message,
-            },
-        ),
-    }
-}
-
-// ---------------------------------------------------------------- server window
-
-pub const CONSOLE_HELP: &str = "\
-  users              list accounts
-  admin <name>       make someone an admin (unadmin <name> to undo)
-  owner <name>       make someone the owner: the admin other admins can't act on
-  kick <name>        disconnect them (they can sign back in)
-  ban <name>         disconnect them and stop them signing in (unban <name> to undo)
-  resetpw <name>     give them a temporary password
-  deluser <name>     delete an account, freeing the name";
-
-/// Account commands typed in the server window. Returns None if `cmd` isn't one.
-pub fn console(shared: &Shared, cmd: &str, arg: &str) -> Option<String> {
-    let needs_name = matches!(
-        cmd,
-        "admin" | "unadmin" | "owner" | "kick" | "ban" | "unban" | "resetpw" | "deluser"
-    );
-    if cmd == "users" {
-        let st = shared.lock().unwrap();
-        let list = st.summaries();
-        if list.is_empty() {
-            return Some(
-                "No accounts yet. People create one in the app with the group password.".into(),
-            );
-        }
-        let mut out = format!(
-            "{} account{}:",
-            list.len(),
-            if list.len() == 1 { "" } else { "s" }
-        );
-        for a in list {
-            let mut tags = Vec::new();
-            if a.online {
-                tags.push("online".to_string());
-            } else if a.last_seen > 0 {
-                tags.push(format!("last seen {}", crate::log::local_time(a.last_seen)));
-            }
-            if a.admin {
-                tags.push("admin".into());
-            }
-            if a.banned {
-                tags.push("BANNED".into());
-            }
-            out.push_str(&format!("\n  {}  ({})", a.name, tags.join(", ")));
-        }
-        return Some(out);
-    }
-    if !needs_name {
-        return None;
-    }
-    if arg.is_empty() {
-        return Some(format!("Type: {cmd} <name>"));
-    }
-    let target = {
-        let st = shared.lock().unwrap();
-        match st.accounts.by_name(arg) {
-            Some(a) => a.id,
-            None => {
-                return Some(format!(
-                    "No account called \"{arg}\". Type \"users\" for the list."
-                ))
-            }
-        }
-    };
-    if cmd == "owner" {
-        let mut st = shared.lock().unwrap();
-        if !st.accounts.get(target).is_some_and(|a| a.admin) {
-            let _ = act(
-                &mut st,
-                None,
-                "The server admin",
-                target,
-                Act::SetAdmin(true),
-            );
-        }
-        st.accounts.set_owner(target);
-        st.save_accounts();
-        let name = st
-            .accounts
-            .get(target)
-            .map(|a| a.name.clone())
-            .unwrap_or_default();
-        warn!("admin", "The server admin made {name} the owner");
-        st.send_accounts_to_admins();
-        return Some(format!("{name} is now the owner (and an admin)."));
-    }
-    let mut secret = None;
-    let act_ = match cmd {
-        "admin" => Act::SetAdmin(true),
-        "unadmin" => Act::SetAdmin(false),
-        "kick" => Act::Kick,
-        "ban" => Act::Ban,
-        "unban" => Act::Unban,
-        "deluser" => Act::Delete,
-        _ => {
-            // resetpw: hash here, on the console thread, with the state unlocked.
-            let temp = config::random_password();
-            let hash = accounts::hash_password(&temp);
-            secret = Some(temp);
-            Act::ResetPassword { temp_hash: hash }
-        }
-    };
-    let mut st = shared.lock().unwrap();
-    Some(match act(&mut st, None, "The server admin", target, act_) {
-        Ok(text) => match secret {
-            Some(s) => format!("{text}\n  Temporary password: {s}"),
-            None => text,
-        },
-        Err(e) => e,
-    })
 }
 
 /// Startup hint for the host.

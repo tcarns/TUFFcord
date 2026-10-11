@@ -550,6 +550,7 @@ impl App {
     fn account_section(&mut self, ui: &mut egui::Ui) -> bool {
         let mut sign_out = false;
         self.account_settings(ui);
+        self.security_settings(ui);
         ui.add_space(6.0);
         let signout =
             egui::Button::new(RichText::new("Sign out").color(pal().red)).fill(pal().raised_2);

@@ -131,6 +131,7 @@ impl App {
                     ),
                     storage_warning: None,
                     storage_hidden: false,
+                    security: crate::security_ui::Security::new(&features),
                 });
                 self.conn = Conn::Online;
                 self.login_error = None;
@@ -313,6 +314,11 @@ impl App {
                     sess.storage_warning = (!text.is_empty()).then_some((text, critical));
                     sess.storage_hidden = false;
                 }
+            }
+            m @ (ServerMsg::Invite { .. }
+            | ServerMsg::Sessions { .. }
+            | ServerMsg::AdminLog { .. }) => {
+                self.on_security_msg(m);
             }
             m @ (ServerMsg::AccountUpdated { .. }
             | ServerMsg::Accounts { .. }

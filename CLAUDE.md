@@ -43,8 +43,8 @@ time; hosting at home must keep working.
 - `server/src/` tokio current_thread. `main.rs` state, message handling, chat,
   voice relay, console commands; `history.rs` recent messages, archive of older
   ones (`data/history/*.jsonl`), `loadOlder`, deleting messages; `storage.rs`
-  file storage limit, admins' storage warning; `auth.rs` sign-in, admin
-  actions (owner rule); `limits.rs` wrong-password counts, hash and connection caps; `channels.rs` admins adding, renaming, deleting, reordering channels; `accounts.rs` storage (argon2); `files.rs` HTTP endpoints on the same
+  file storage limit, admins' storage warning; `auth.rs` sign-in; `admin.rs` admin
+  actions (owner rule); `limits.rs` wrong-password counts, hash and connection caps; `invites.rs` one-time invites; `sessions.rs` signed-in devices, new-address notices; `adminlog.rs` admin log (`admin_log!`); `channels.rs` admins adding, renaming, deleting, reordering channels; `accounts.rs` storage (argon2); `files.rs` HTTP endpoints on the same
   port (POST/PUT/GET /files, Range, chunked bodies); `selfupdate.rs` watcher +
   updater; `config.rs` settings file and its upgrades; `log.rs`.
 - `client/src/` egui 0.32 (glow). The `App` struct is split across files,
@@ -61,7 +61,7 @@ time; hosting at home must keep working.
     attachments and players; `downloads.rs` cache downloads, preloading; `posters.rs` video
     preview frames (sender's, else taken locally); `autoscroll.rs` middle-click scroll;
     `volume_ui.rs` speaker button and volume popup; `channels_ui.rs` channel admin (+, right-click menu, drag to reorder);
-    `members.rs`; `chat_text.rs`; `theme.rs`; `history_ui.rs` loading older
+    `members.rs`; `security_ui.rs` devices, invites, admin log in Settings > Account; `chat_text.rs`; `theme.rs`; `history_ui.rs` loading older
     messages on scroll up, admins' storage bar.
   - Library (`lib.rs`, shared with `bin/bot.rs`, no UI): `media.rs` Media
     Foundation player (Windows only); `crash.rs`; `net.rs`, `voice.rs`,
@@ -108,7 +108,8 @@ time; hosting at home must keep working.
 - Wine UI: `tools/wine-ui.sh start <exe>`, `shot out.png 400x80+340+440`, `stop`.
 - Release: bump `version` in root `Cargo.toml`, add a `## x.y.z` section at the
   top of `CHANGELOG.md` (it becomes the notes the app shows), commit, push to
-  main. Then `tools/release-check.sh` (run passed, files, checksums, old-name
+  main, approve the run (signing setup: `docs/releasing.md`,
+  `tools/release-key.py`). Then `tools/release-check.sh` (run passed, files, checksums, old-name
   copies, zip, `--version`). `gh release` uses GraphQL, which the proxy blocks;
   use `gh api` (REST).
 - Commits: author Tyler Carns (repo-local config is set); end messages with

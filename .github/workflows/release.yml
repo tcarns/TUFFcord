@@ -24,6 +24,9 @@ jobs:
     # Pinned: the Linux server is built here and needs a glibc no newer than
     # the rented server's (Ubuntu 24.04).
     runs-on: ubuntu-24.04
+    # Holds the release signing key; set up with "Required reviewers" so a
+    # release waits for the owner's Approve click (docs/releasing.md).
+    environment: release
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -111,6 +114,29 @@ jobs:
           sha256sum TUFFcord.exe TUFFcord-server.exe backroom.exe backroom-server.exe TUFFcord-server-linux-x86_64 "TUFFcord-$TAG-windows.zip" > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
+      # Apps and servers from 0.11 install only releases signed with this key.
+      - name: Sign the checksums
+        if: steps.version.outputs.new == 'true'
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          if [ -z "$RELEASE_SIGNING_KEY" ]; then
+            echo "::error::RELEASE_SIGNING_KEY is missing from the release environment (docs/releasing.md)."
+            exit 1
+          fi
+          set -o pipefail
+          umask 077
+          # OpenSSH (ssh-keygen) or PEM; release-key.py turns either into PEM.
+          printf '%s\n' "$RELEASE_SIGNING_KEY" | python3 tools/release-key.py > "$RUNNER_TEMP/key.pem"
+          openssl pkeyutl -sign -inkey "$RUNNER_TEMP/key.pem" -rawin -in dist/SHA256SUMS.txt -out "$RUNNER_TEMP/sig.bin"
+          rm -f "$RUNNER_TEMP/key.pem"
+          od -An -tx1 -v "$RUNNER_TEMP/sig.bin" | tr -d ' \n' > dist/SHA256SUMS.txt.sig
+          echo >> dist/SHA256SUMS.txt.sig
+          # Check it with the public key the programs carry.
+          pub=$(grep -oE 'RELEASE_KEY: &str = "[0-9a-f]{64}"' proto/src/update.rs | grep -oE '[0-9a-f]{64}')
+          printf '302a300506032b6570032100%s' "$pub" | sed 's/../\\x&/g' | xargs -0 printf '%b' > "$RUNNER_TEMP/pub.der"
+          openssl pkeyutl -verify -pubin -keyform DER -inkey "$RUNNER_TEMP/pub.der" -rawin -in dist/SHA256SUMS.txt -sigfile "$RUNNER_TEMP/sig.bin"
+
       - name: Release notes from CHANGELOG.md
         if: steps.version.outputs.new == 'true'
         env:
@@ -127,5 +153,5 @@ jobs:
           TAG: ${{ steps.version.outputs.tag }}
         run: |
           gh release create "$TAG" "dist/TUFFcord-$TAG-windows.zip" dist/TUFFcord.exe dist/TUFFcord-server.exe \
-            dist/backroom.exe dist/backroom-server.exe dist/TUFFcord-server-linux-x86_64 dist/SHA256SUMS.txt \
+            dist/backroom.exe dist/backroom-server.exe dist/TUFFcord-server-linux-x86_64 dist/SHA256SUMS.txt dist/SHA256SUMS.txt.sig \
             --target "$GITHUB_SHA" --title "TUFFcord ${TAG#v}" --notes-file notes.md

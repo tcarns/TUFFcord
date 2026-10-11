@@ -125,7 +125,7 @@ fn tab(ui: &mut egui::Ui, text: &str, selected: bool, width: f32) -> egui::Respo
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-fn when(ms: u64) -> String {
+pub(crate) fn when(ms: u64) -> String {
     if ms == 0 {
         return "never".into();
     }
@@ -501,6 +501,17 @@ impl App {
             300,
             !busy,
         );
+        if tuffcord::net::unencrypted_public(&self.s.server) {
+            ui.add(
+                egui::Label::new(
+                    RichText::new("This address isn't encrypted, so your password would cross the internet as plain text. Use the https:// address if the server has one.")
+                        .color(pal().red)
+                        .size(12.5),
+                )
+                .wrap(),
+            );
+            ui.add_space(4.0);
+        }
         match self.acct.mode {
             LoginMode::SignIn => {
                 submit |= field(ui, "Your name", "", &mut self.s.name, false, 32, !busy);
@@ -527,7 +538,7 @@ impl App {
                 submit |= field(
                     ui,
                     "Pick a password",
-                    "At least 6 characters",
+                    "At least 8 characters",
                     &mut self.acct.password,
                     true,
                     128,
@@ -544,7 +555,7 @@ impl App {
                 );
                 submit |= field(
                     ui,
-                    "Group password",
+                    "Group password or invite",
                     "Ask whoever runs the server",
                     &mut self.acct.invite,
                     true,
@@ -581,9 +592,11 @@ impl App {
         } else if self.acct.mode == LoginMode::SignIn {
             ui.add_space(8.0);
             ui.label(
-                RichText::new("New here? Choose \"Create account\" and use the group password.")
-                    .size(12.5)
-                    .color(pal().faint),
+                RichText::new(
+                    "New here? Choose \"Create account\" and use the group password or an invite.",
+                )
+                .size(12.5)
+                .color(pal().faint),
             );
         }
     }

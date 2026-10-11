@@ -5,14 +5,19 @@
 
 #[macro_use]
 mod log;
+#[macro_use]
+mod adminlog;
 mod accounts;
+mod admin;
 mod auth;
 mod channels;
 mod config;
 mod files;
 mod history;
+mod invites;
 mod limits;
 mod selfupdate;
+mod sessions;
 mod storage;
 
 use config::Config;
@@ -346,6 +351,10 @@ fn handle_text(shared: &Shared, id: u32, text: &str) -> Option<ClientMsg> {
         ClientMsg::MoveChannel { name, voice, index } => {
             channels::move_to(&mut st, id, &name, voice, index)
         }
+        ClientMsg::CreateInvite => invites::create(&mut st, id),
+        ClientMsg::Sessions => sessions::list(&st, id),
+        ClientMsg::EndSession { id: which } => sessions::end(&mut st, id, which),
+        ClientMsg::AdminLog => adminlog::send(&mut st, id),
     }
     None
 }
@@ -363,7 +372,7 @@ async fn handle_async(shared: &Shared, id: u32, msg: ClientMsg) {
             old_password,
             new_password,
         } => auth::change_password(shared, id, old_password, new_password).await,
-        ClientMsg::Admin { action } => auth::admin(shared, id, action).await,
+        ClientMsg::Admin { action } => admin::admin(shared, id, action).await,
         _ => {}
     }
 }
@@ -1041,7 +1050,7 @@ fn console_commands(shared: Shared, updates: std::sync::mpsc::Sender<selfupdate:
             "help" => println!(
                 "Commands:\n  level              show the current log level\n  level <name>       change it now ({})\n  status             who is online and in voice, uptime, memory use\n  update             install the newest version now and restart\n{}\n  help               show this list",
                 log::LEVEL_NAMES.join(", "),
-                auth::CONSOLE_HELP
+                admin::CONSOLE_HELP
             ),
             "level" if arg.is_empty() => println!("Log level is \"{}\". Options, most to least detail: {}", log::level().name(), log::LEVEL_NAMES.join(", ")),
             "level" => match Level::parse(&arg) {
@@ -1056,7 +1065,7 @@ fn console_commands(shared: Shared, updates: std::sync::mpsc::Sender<selfupdate:
             "update" => {
                 let _ = updates.send(selfupdate::Request::Now);
             }
-            other => match auth::console(&shared, other, &arg) {
+            other => match admin::console(&shared, other, &arg) {
                 Some(out) => println!("{out}"),
                 None => println!("Unknown command \"{cmd}\". Type \"help\" for the list."),
             },

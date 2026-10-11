@@ -18,6 +18,7 @@ mod emoji_picker;
 mod history_ui;
 mod members;
 mod posters;
+mod security_ui;
 mod server_msgs;
 mod settings_window;
 mod sidebar;
@@ -201,6 +202,8 @@ struct Session {
     edit_channels: bool,
     /// Older messages load on scrolling up (server 0.10+); see `history_ui`.
     older: history_ui::Older,
+    /// Signed-in devices, invites, admin log (Settings > Account).
+    security: security_ui::Security,
     /// Admins: the server's storage warning (text, urgent), and whether it was closed.
     storage_warning: Option<(String, bool)>,
     storage_hidden: bool,

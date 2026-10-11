@@ -143,8 +143,8 @@ pub fn delete_message(st: &mut State, conn: u32, channel: &str, msg_id: &str) {
             st.files.stored = st.files.stored.saturating_sub(freed);
         }
     }
-    warn!(
-        "admin",
+    admin_log!(
+        st,
         "{by} deleted a message by {} in #{channel}{}",
         message.author,
         if files_removed > 0 {

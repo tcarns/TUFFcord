@@ -73,6 +73,46 @@ pub fn agent(timeout: Duration) -> ureq::Agent {
 
 /// The checksum file every release carries.
 pub const SUMS_FILE: &str = "SHA256SUMS.txt";
+/// Its Ed25519 signature (hex), made by the release workflow with a key kept
+/// in GitHub's "release" environment. A checksum only proves a download is
+/// whole; the signature proves the release came from us.
+pub const SIG_FILE: &str = "SHA256SUMS.txt.sig";
+/// The public half of the release key.
+const RELEASE_KEY: &str = "208ddb6af3d698ca4113d5b70cf8f7e4d125fb7f1b07a883d2ab76690ba3ba20";
+
+fn hex_bytes<const N: usize>(s: &str) -> Option<[u8; N]> {
+    let s = s.trim();
+    if s.len() != N * 2 || !s.is_ascii() {
+        return None;
+    }
+    let mut out = [0u8; N];
+    for (i, b) in out.iter_mut().enumerate() {
+        *b = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16).ok()?;
+    }
+    Some(out)
+}
+
+/// The key releases must be signed with. Tests that serve their own releases
+/// (`BACKROOM_UPDATE_URL`) may bring their own key.
+fn release_key() -> String {
+    match (
+        std::env::var("BACKROOM_UPDATE_URL"),
+        std::env::var("BACKROOM_UPDATE_KEY"),
+    ) {
+        (Ok(_), Ok(k)) => k,
+        _ => RELEASE_KEY.to_string(),
+    }
+}
+
+/// True if `sig_hex` is the release key's signature of `sums`.
+pub fn signed_by(key_hex: &str, sums: &[u8], sig_hex: &str) -> bool {
+    let (Some(key), Some(sig)) = (hex_bytes::<32>(key_hex), hex_bytes::<64>(sig_hex)) else {
+        return false;
+    };
+    let key = ed25519_compact::PublicKey::new(key);
+    key.verify(sums, &ed25519_compact::Signature::new(sig))
+        .is_ok()
+}
 const MAX_DOWNLOAD: u64 = 200 * 1024 * 1024;
 
 pub fn releases_page() -> String {
@@ -186,9 +226,12 @@ pub fn parse_release(json: &str, current: &str) -> Result<Option<Release>, Strin
     }))
 }
 
-/// True if `release` has `asset` and a checksum file, so it can be installed automatically.
+/// True if `release` has `asset`, a checksum file and its signature, so it can
+/// be installed automatically.
 pub fn installable(release: &Release, asset: &str) -> bool {
-    release.asset(asset).is_some() && release.asset(SUMS_FILE).is_some()
+    release.asset(asset).is_some()
+        && release.asset(SUMS_FILE).is_some()
+        && release.asset(SIG_FILE).is_some()
 }
 
 /// Download `asset` from `release` next to `exe` and check it against the
@@ -231,6 +274,29 @@ pub fn download_verified(
         .limit(64 * 1024)
         .read_to_string()
         .map_err(|e| format!("Couldn't read the checksum file ({e})."))?;
+    let sig = release
+        .asset(SIG_FILE)
+        .ok_or("This release isn't signed, so it can't be installed safely.")?;
+    let mut resp = agent
+        .get(&sig.url)
+        .header("User-Agent", &user_agent)
+        .call()
+        .map_err(|e| format!("Couldn't reach GitHub ({e})."))?;
+    if resp.status().as_u16() != 200 {
+        return Err(format!(
+            "GitHub answered with an error ({}).",
+            resp.status().as_u16()
+        ));
+    }
+    let sig_text = resp
+        .body_mut()
+        .with_config()
+        .limit(1024)
+        .read_to_string()
+        .map_err(|e| format!("Couldn't read the signature ({e})."))?;
+    if !signed_by(&release_key(), sums_text.as_bytes(), &sig_text) {
+        return Err("This release isn't signed with TUFFcord's release key, so it wasn't installed. Nothing was changed.".into());
+    }
     let expected = expected_hash(&sums_text, asset)
         .ok_or_else(|| format!("The checksum file doesn't list {asset}."))?;
 
@@ -481,6 +547,27 @@ pub fn expected_hash(sums: &str, name: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn signatures() {
+        // A throwaway key: openssl genpkey -algorithm ed25519; pkeyutl -sign -rawin.
+        let key = "7bf0a346cca4bbe27770b779390d31711417a824ad392dd40ab13582f9b5297f";
+        let sig = "73a6ca31a1bfac26757c703ad41369278109068b432b0c995fae108c3a29fd2c2200f723887f18cca32cf1c359ae0b4e51186799925cf977ca89485b8f07a10d";
+        let sums = b"abc  TUFFcord.exe\n";
+        assert!(signed_by(key, sums, sig));
+        assert!(
+            signed_by(key, sums, &format!("{sig}\n")),
+            "a line break after it is fine"
+        );
+        assert!(!signed_by(key, b"abd  TUFFcord.exe\n", sig), "changed sums");
+        assert!(!signed_by(RELEASE_KEY, sums, sig), "another key");
+        assert!(!signed_by(key, b"x", "00"), "short signature");
+        assert!(!signed_by("zz", b"x", &"0".repeat(128)), "bad key");
+        assert!(
+            !signed_by(RELEASE_KEY, b"sums", &"0".repeat(128)),
+            "wrong signature"
+        );
+    }
     #[test]
     fn finds_hashes() {
         let sums = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  backroom.exe\nFEDCBA9876543210FEDCBA9876543210FEDCBA9876543210FEDCBA9876543210 *backroom-server.exe\n";

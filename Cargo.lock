@@ -691,6 +691,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "ed25519-compact"
+version = "2.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1454db4f2edb7f0e8fe0c5b375b0c978fc63244cc9f010d160e417eb10139aa8"
+
+[[package]]
 name = "eframe"
 version = "0.32.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2337,8 +2343,9 @@ checksum = "3d595e54a326bc53c1c197b32d295e14b169e3cfeaa8dc82b529f947fba6bcf5"
 
 [[package]]
 name = "proto"
-version = "0.10.1"
+version = "0.11.0"
 dependencies = [
+ "ed25519-compact",
  "serde",
  "serde_json",
  "sha2",
@@ -3108,7 +3115,7 @@ checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
 
 [[package]]
 name = "tuffcord"
-version = "0.10.1"
+version = "0.11.0"
 dependencies = [
  "arboard",
  "chrono",
@@ -3135,7 +3142,7 @@ dependencies = [
 
 [[package]]
 name = "tuffcord-server"
-version = "0.10.1"
+version = "0.11.0"
 dependencies = [
  "argon2",
  "chrono",

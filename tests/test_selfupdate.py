@@ -1,7 +1,7 @@
 """Server self-update on Linux, through the watcher: a copy still named
 backroom-server takes its new name when started, then it finds a newer release on a
-local web server, checks and installs it, restarts (people reconnect), refuses
-a mislabeled release, and Ctrl+C stops watcher and server together."""
+local web server, refuses it while it isn't signed with the release key, checks
+and installs it, restarts (people reconnect), refuses a mislabeled release, and Ctrl+C stops watcher and server together."""
 import asyncio, hashlib, json, os, shutil, signal, subprocess, sys, time
 
 from lib import DIR, Server, binary, check, free_port, main, spawn, wait_port
@@ -10,11 +10,25 @@ ASSET = "TUFFcord-server"
 
 
 def write_release(rel, port, version):
-    names = [ASSET, "SHA256SUMS.txt"]
+    names = [ASSET, "SHA256SUMS.txt", "SHA256SUMS.txt.sig"]
     json.dump({"tag_name": f"v{version}", "html_url": "x", "body": "test", "draft": False, "prerelease": False,
                "assets": [{"name": n, "browser_download_url": f"http://127.0.0.1:{port}/{n}", "size": 1}
                           for n in names]},
               open(os.path.join(rel, "release.json"), "w"))
+
+
+def sign(rel, key):
+    """Sign the release's checksums with `key` (a PEM file), like the release workflow."""
+    sums, sig = os.path.join(rel, "SHA256SUMS.txt"), os.path.join(rel, "sig.bin")
+    subprocess.run(["openssl", "pkeyutl", "-sign", "-inkey", key, "-rawin", "-in", sums, "-out", sig], check=True)
+    open(sums + ".sig", "w").write(open(sig, "rb").read().hex() + "\n")
+
+
+def new_key(path):
+    subprocess.run(["openssl", "genpkey", "-algorithm", "ed25519", "-out", path], check=True)
+    der = subprocess.run(["openssl", "pkey", "-in", path, "-pubout", "-outform", "DER"],
+                         check=True, capture_output=True).stdout
+    return der[-32:].hex()
 
 
 async def wait_log(path, text, timeout=20):
@@ -38,6 +52,10 @@ async def run():
     open(os.path.join(rel, ASSET), "wb").write(new)
     open(os.path.join(rel, "SHA256SUMS.txt"), "w").write(f"{hashlib.sha256(new).hexdigest()}  {ASSET}\n")
     os.chmod(os.path.join(rel, ASSET), 0o755)
+    key, other = os.path.join(DIR, "release.pem"), os.path.join(DIR, "other.pem")
+    pub = new_key(key)
+    new_key(other)
+    sign(rel, other)  # signed, but not with the release key
     http_port = free_port()
     spawn([sys.executable, "-m", "http.server", str(http_port), "--bind", "127.0.0.1"], cwd=rel,
           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -48,7 +66,7 @@ async def run():
     out = os.path.join(srv_dir, "server.out")
     env = dict(os.environ, PASSWORD="g", PORT=str(port), NO_COLOR="1", LOG_LEVEL="debug",
                CHECK_UPDATES="true", BACKROOM_UPDATE_URL=f"http://127.0.0.1:{http_port}/release.json",
-               BACKROOM_SERVER_UPDATE_ASSET=ASSET, BACKROOM_TEST_REPORT_VERSION="99.0.0",
+               BACKROOM_UPDATE_KEY=pub, BACKROOM_SERVER_UPDATE_ASSET=ASSET, BACKROOM_TEST_REPORT_VERSION="99.0.0",
                DATA_DIR=os.path.join(srv_dir, "data"), BACKROOM_CONFIG=os.path.join(srv_dir, "none.toml"))
     env.pop("BACKROOM_NO_WATCHER", None)
     watcher = spawn([old_exe], cwd=srv_dir, env=env, stdin=subprocess.PIPE, stdout=open(out, "w"),
@@ -62,6 +80,10 @@ async def run():
 
     # It finds 99.0.0 a few seconds after starting; "update" installs and restarts now.
     check(await wait_log(out, "99.0.0"), "the server notices the new release")
+    watcher.stdin.write("update\n"), watcher.stdin.flush()
+    check(await wait_log(out, "isn't signed with TUFFcord's release key"), "a release signed with another key is refused")
+    check(open(exe, "rb").read() != new, "...and nothing is installed")
+    sign(rel, key)
     watcher.stdin.write("update\n"), watcher.stdin.flush()
     r = await alice.wait("restarting", timeout=20)
     check(r is not None, "people are told the server is restarting")

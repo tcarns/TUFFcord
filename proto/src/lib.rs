@@ -138,6 +138,22 @@ pub enum ClientMsg {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         before: Option<u64>,
     },
+    /// Admins: make a one-time invite code (answered with
+    /// [`ServerMsg::Invite`]). It works in place of the group password when
+    /// creating an account. Servers with [`FEATURE_INVITES`] only.
+    CreateInvite,
+    /// Your signed-in devices (answered with [`ServerMsg::Sessions`]).
+    /// Servers with [`FEATURE_SESSIONS`] only.
+    Sessions,
+    /// Sign out one of your devices (`id` from [`SessionInfo`]), or every
+    /// device but this one when `id` is left out.
+    EndSession {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
+    },
+    /// Admins: recent admin actions (answered with [`ServerMsg::AdminLog`]).
+    /// Servers with [`FEATURE_ADMIN_LOG`] only.
+    AdminLog,
 }
 
 /// A finished upload to attach to a message, with what the sender's app
@@ -442,6 +458,42 @@ pub enum ServerMsg {
         #[serde(default)]
         critical: bool,
     },
+    /// Answer to [`ClientMsg::CreateInvite`]: the code (shown once) and when
+    /// it stops working (ms since 1970).
+    Invite {
+        code: String,
+        expires: u64,
+    },
+    /// Answer to [`ClientMsg::Sessions`], most recently used first.
+    Sessions {
+        list: Vec<SessionInfo>,
+    },
+    /// Answer to [`ClientMsg::AdminLog`], newest first.
+    AdminLog {
+        entries: Vec<AdminLogEntry>,
+    },
+}
+
+/// One signed-in device (a saved sign-in on the server).
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionInfo {
+    pub id: String,
+    pub created: u64,
+    pub last_used: u64,
+    /// Address it was last used from.
+    #[serde(default)]
+    pub ip: String,
+    /// The device asking.
+    #[serde(default)]
+    pub current: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminLogEntry {
+    pub ts: u64,
+    pub text: String,
 }
 
 /// A channel's old and new name (see [`ServerMsg::Channels`]).
@@ -484,6 +536,12 @@ pub const FEATURE_CHANNELS: &str = "channels";
 pub const FEATURE_CHANNEL_EDIT: &str = "channelEdit";
 /// Keeps every message; apps load older ones with [`ClientMsg::LoadOlder`] (0.10).
 pub const FEATURE_OLDER_MESSAGES: &str = "olderMessages";
+/// One-time invites ([`ClientMsg::CreateInvite`]).
+pub const FEATURE_INVITES: &str = "invites";
+/// Signed-in devices ([`ClientMsg::Sessions`], [`ClientMsg::EndSession`]).
+pub const FEATURE_SESSIONS: &str = "sessions";
+/// The admin log ([`ClientMsg::AdminLog`]).
+pub const FEATURE_ADMIN_LOG: &str = "adminLog";
 
 // ---------------------------------------------------------------- voice frames
 

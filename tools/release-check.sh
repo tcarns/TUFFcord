@@ -28,6 +28,15 @@ for u in $urls; do curl -sSL -o "$dir/$(basename "$u")" "$u"; done
 (cd "$dir" && sha256sum --quiet -c SHA256SUMS.txt >/dev/null 2>&1); ok $? "checksums match"
 cmp -s "$dir/TUFFcord.exe" "$dir/backroom.exe" && cmp -s "$dir/TUFFcord-server.exe" "$dir/backroom-server.exe"
 ok $? "old-name copies are identical (for copies from before the rename)"
+# From 0.11 the checksums are signed with the release key the programs carry.
+major_minor=$(echo "$v" | awk -F. '{ printf "%d%03d", $1, $2 }')
+if [ "$major_minor" -ge 11 ]; then
+  pub=$(grep -oE 'RELEASE_KEY: &str = "[0-9a-f]{64}"' proto/src/update.rs | grep -oE '[0-9a-f]{64}')
+  printf '302a300506032b6570032100%s' "$pub" | sed 's/../\\x&/g' | xargs -0 printf '%b' > "$dir/pub.der"
+  tr -d '\n' < "$dir/SHA256SUMS.txt.sig" | sed 's/../\\x&/g' | xargs -0 printf '%b' > "$dir/sig.bin"
+  openssl pkeyutl -verify -pubin -keyform DER -inkey "$dir/pub.der" -rawin -in "$dir/SHA256SUMS.txt" -sigfile "$dir/sig.bin" >/dev/null 2>&1
+  ok $? "checksums are signed with the release key"
+fi
 list=$(unzip -Z1 "$dir/TUFFcord-$tag-windows.zip" 2>/dev/null)
 grep -qx TUFFcord/TUFFcord.exe <<<"$list" && grep -qx TUFFcord/TUFFcord-server.exe <<<"$list" && grep -qx TUFFcord/README.txt <<<"$list"
 ok $? "zip has TUFFcord/ with both programs and README.txt"

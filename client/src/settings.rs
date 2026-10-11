@@ -27,6 +27,10 @@ pub struct Settings {
     /// The group password, saved by versions before accounts (and still, for
     /// servers that haven't been updated). Used to fill in "Create account".
     pub password: String,
+    /// `token` and `password` as saved on Windows: encrypted for this Windows
+    /// user (DPAPI), so copying settings.json to another PC gets nothing.
+    pub token_sealed: String,
+    pub password_sealed: String,
     pub remember: bool,
     /// Connect straight away next time (set after a successful sign-in with "remember").
     pub auto_connect: bool,
@@ -102,6 +106,8 @@ impl Default for Settings {
             name: String::new(),
             token: String::new(),
             password: String::new(),
+            token_sealed: String::new(),
+            password_sealed: String::new(),
             remember: true,
             auto_connect: false,
             input_device: None,
@@ -220,6 +226,12 @@ impl Settings {
                 s.save();
             }
         }
+        if !s.token_sealed.is_empty() {
+            s.token = sealed::open(&s.token_sealed).unwrap_or_default();
+        }
+        if !s.password_sealed.is_empty() {
+            s.password = sealed::open(&s.password_sealed).unwrap_or_default();
+        }
         s.media_default = s.media_default.clamp(0.0, 1.0);
         s.media_level = s.media_default;
         s.cache_mb = s.cache_mb.max(MIN_CACHE_MB);
@@ -237,6 +249,16 @@ impl Settings {
             copy.password.clear();
             copy.token.clear();
             copy.auto_connect = false;
+        }
+        copy.token_sealed.clear();
+        copy.password_sealed.clear();
+        if let Some(t) = sealed::seal(&copy.token) {
+            copy.token_sealed = t;
+            copy.token.clear();
+        }
+        if let Some(t) = sealed::seal(&copy.password) {
+            copy.password_sealed = t;
+            copy.password.clear();
         }
         let p = path();
         if let Some(dir) = p.parent() {
@@ -317,5 +339,105 @@ mod tests {
             .unwrap()
             .contains("Tyler"));
         let _ = std::fs::remove_dir_all(&base);
+    }
+}
+
+/// Encrypting saved sign-ins for the Windows user (DPAPI). Elsewhere (tests,
+/// the Linux build) nothing is sealed and they're saved as they are.
+mod sealed {
+    /// Hex of the encrypted text; None if empty or not on Windows.
+    #[cfg(windows)]
+    pub fn seal(text: &str) -> Option<String> {
+        use windows_sys::Win32::Security::Cryptography::{CryptProtectData, CRYPT_INTEGER_BLOB};
+        if text.is_empty() {
+            return None;
+        }
+        let input = CRYPT_INTEGER_BLOB {
+            cbData: text.len() as u32,
+            pbData: text.as_ptr() as *mut u8,
+        };
+        let mut out = CRYPT_INTEGER_BLOB {
+            cbData: 0,
+            pbData: std::ptr::null_mut(),
+        };
+        // SAFETY: input points at `text` for the call; out is filled by Windows
+        // and freed with LocalFree below.
+        let ok = unsafe {
+            CryptProtectData(
+                &input,
+                std::ptr::null(),
+                std::ptr::null(),
+                std::ptr::null(),
+                std::ptr::null(),
+                0,
+                &mut out,
+            )
+        };
+        if ok == 0 {
+            return None;
+        }
+        let bytes = unsafe { std::slice::from_raw_parts(out.pbData, out.cbData as usize) };
+        let hex = bytes.iter().map(|b| format!("{b:02x}")).collect();
+        unsafe { windows_sys::Win32::Foundation::LocalFree(out.pbData as _) };
+        Some(hex)
+    }
+
+    #[cfg(windows)]
+    pub fn open(hex: &str) -> Option<String> {
+        use windows_sys::Win32::Security::Cryptography::{CryptUnprotectData, CRYPT_INTEGER_BLOB};
+        let mut bytes: Vec<u8> = (0..hex.len() / 2)
+            .map(|i| u8::from_str_radix(hex.get(i * 2..i * 2 + 2)?, 16).ok())
+            .collect::<Option<_>>()?;
+        let input = CRYPT_INTEGER_BLOB {
+            cbData: bytes.len() as u32,
+            pbData: bytes.as_mut_ptr(),
+        };
+        let mut out = CRYPT_INTEGER_BLOB {
+            cbData: 0,
+            pbData: std::ptr::null_mut(),
+        };
+        // SAFETY: as in `seal`.
+        let ok = unsafe {
+            CryptUnprotectData(
+                &input,
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                std::ptr::null(),
+                std::ptr::null(),
+                0,
+                &mut out,
+            )
+        };
+        if ok == 0 {
+            return None;
+        }
+        let plain = unsafe { std::slice::from_raw_parts(out.pbData, out.cbData as usize) }.to_vec();
+        unsafe { windows_sys::Win32::Foundation::LocalFree(out.pbData as _) };
+        String::from_utf8(plain).ok()
+    }
+
+    #[cfg(all(test, windows))]
+    #[test]
+    fn round_trip() {
+        let sealed = seal("token-123").unwrap();
+        assert!(!sealed.contains(
+            &"token-123"
+                .bytes()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>()
+        ));
+        assert_eq!(open(&sealed).as_deref(), Some("token-123"));
+        assert_eq!(open("00ff"), None);
+        assert_eq!(seal(""), None);
+    }
+
+    #[cfg(not(windows))]
+    pub fn seal(_text: &str) -> Option<String> {
+        None
+    }
+
+    #[cfg(not(windows))]
+    pub fn open(_hex: &str) -> Option<String> {
+        None
     }
 }

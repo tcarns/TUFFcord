@@ -156,6 +156,37 @@ pub fn normalize_server(input: &str) -> Result<String, String> {
     Ok(url)
 }
 
+/// True if signing in to `input` would send the password unencrypted over the
+/// internet: a `ws://` address that isn't this PC or the home network.
+pub fn unencrypted_public(input: &str) -> bool {
+    let Ok(url) = normalize_server(input) else {
+        return false;
+    };
+    let Some(rest) = url.strip_prefix("ws://") else {
+        return false;
+    };
+    let hostport = rest.split('/').next().unwrap_or("");
+    let host = if let Some(h) = hostport.strip_prefix('[') {
+        h.split(']').next().unwrap_or("")
+    } else {
+        hostport.split(':').next().unwrap_or("")
+    };
+    match host.parse::<std::net::IpAddr>() {
+        Ok(std::net::IpAddr::V4(ip)) => {
+            !(ip.is_loopback()
+                || ip.is_private()
+                || ip.is_link_local()
+                || ip.octets()[0] == 100 && ip.octets()[1] & 0xC0 == 64)
+        }
+        Ok(std::net::IpAddr::V6(ip)) => {
+            !(ip.is_loopback()
+                || (ip.segments()[0] & 0xfe00) == 0xfc00
+                || (ip.segments()[0] & 0xffc0) == 0xfe80)
+        }
+        Err(_) => host != "localhost" && !host.ends_with(".local") && host.contains('.'),
+    }
+}
+
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -462,7 +493,7 @@ fn update_names(names: &mut HashMap<u32, String>, state: &[proto::VoiceChannelSt
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_server;
+    use super::{normalize_server, unencrypted_public};
     #[test]
     fn addresses() {
         assert_eq!(
@@ -485,6 +516,12 @@ mod tests {
             normalize_server("ws://host:1/custom").unwrap(),
             "ws://host:1/custom"
         );
+        assert!(unencrypted_public("5.161.12.34:3000"));
+        assert!(unencrypted_public("http://chat.example.com"));
+        assert!(!unencrypted_public("chat.example.com"), "wss");
+        assert!(!unencrypted_public("localhost:3000"));
+        assert!(!unencrypted_public("192.168.1.20:3000"));
+        assert!(!unencrypted_public("myserver:3000"));
         assert!(normalize_server("  ").is_err());
     }
 }

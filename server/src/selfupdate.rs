@@ -296,6 +296,9 @@ pub enum Request {
     Now,
 }
 
+/// How long a release has to be out before servers install it by themselves.
+const AUTO_INSTALL_AFTER: Duration = Duration::from_secs(24 * 3600);
+
 pub struct Checker {
     pub periodic: bool,
     pub auto_install: bool,
@@ -312,10 +315,11 @@ impl Checker {
         }
         let mut announced: Option<String> = None;
         let mut installed: Option<String> = None;
+        let mut seen: Option<(String, Instant)> = None;
         let mut asked = false;
         loop {
             if self.periodic || asked {
-                self.check_once(asked, &mut announced, &mut installed);
+                self.check_once(asked, &mut announced, &mut installed, &mut seen);
             }
             let next = if self.periodic {
                 self.requests.recv_timeout(proto::update::CHECK_EVERY)
@@ -337,6 +341,7 @@ impl Checker {
         asked: bool,
         announced: &mut Option<String>,
         installed: &mut Option<String>,
+        seen: &mut Option<(String, Instant)>,
     ) {
         if asked {
             if let Some(v) = installed.clone() {
@@ -381,6 +386,26 @@ impl Checker {
         }
         let asset = asset_name();
         let can_install = can_self_install() && proto::update::installable(&release, &asset);
+        // A new release installs itself only after it has been out a day, so a
+        // bad one can be pulled before it reaches every server.
+        if seen.as_ref().is_none_or(|(v, _)| *v != release.version) {
+            *seen = Some((release.version.clone(), Instant::now()));
+        }
+        let waiting = seen
+            .as_ref()
+            .is_some_and(|(_, t)| t.elapsed() < AUTO_INSTALL_AFTER);
+        if !asked && self.auto_install && can_install && waiting {
+            if announced.as_deref() != Some(release.version.as_str()) {
+                info!(
+                    "update",
+                    "TUFFcord {} is available (this server is {}). It installs itself in a day; type \"update\" to install it now.",
+                    release.version,
+                    proto::update::CURRENT
+                );
+                *announced = Some(release.version.clone());
+            }
+            return;
+        }
         if !(asked || self.auto_install) || !can_install {
             if announced.as_deref() != Some(release.version.as_str()) {
                 let how = if !can_install {

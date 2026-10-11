@@ -43,8 +43,8 @@ pub fn create(st: &mut State, conn: u32, name: &str, voice: bool) {
         st.history.entry(name.clone()).or_default();
     }
     save(st, voice);
-    warn!(
-        "admin",
+    admin_log!(
+        st,
         "{} added the {kind} channel {}",
         st.who(conn),
         shown(&name, voice)
@@ -102,8 +102,8 @@ pub fn rename(st: &mut State, conn: u32, name: &str, to: &str, voice: bool) {
         st.archive.rename(name, &to);
     }
     save(st, voice);
-    warn!(
-        "admin",
+    admin_log!(
+        st,
         "{} renamed the {kind} channel {} to {}",
         st.who(conn),
         shown(name, voice),
@@ -175,8 +175,8 @@ pub fn delete(st: &mut State, conn: u32, name: &str, voice: bool) {
         );
     }
     save(st, voice);
-    warn!(
-        "admin",
+    admin_log!(
+        st,
         "{} deleted the {kind} channel {}{detail}",
         st.who(conn),
         shown(name, voice)
@@ -217,8 +217,8 @@ pub fn move_to(st: &mut State, conn: u32, name: &str, voice: bool, index: usize)
     let ch = list.remove(pos);
     list.insert(index, ch);
     save(st, voice);
-    info!(
-        "admin",
+    admin_log!(
+        st,
         "{} moved the {} channel {} to place {}",
         st.who(conn),
         kind(voice),
