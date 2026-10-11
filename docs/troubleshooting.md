@@ -72,3 +72,6 @@ bug or environment problem takes more than one try to understand.
 - **Release step 403 from api.github.com for `tcarns/TUFFcord`** inside this
   workspace → the proxy only allows repos attached to the session; on the real
   internet a missing repo is a 404 and the app falls back to the old name.
+- **`release-check.sh`: "checksums are signed ... FAIL" on a good release** →
+  `ssh-keygen` missing in the workspace (verify-release.sh needs it) → install
+  `openssh-client` (`tools/setup.sh` does).

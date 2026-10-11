@@ -107,3 +107,9 @@ Settled choices and why. Add one when a choice would otherwise be revisited.
   argon2 memory because glibc raises its mmap threshold (fixed threshold at
   start, `limits::return_hash_memory`; argon2 stays at 19 MiB). Review:
   `analysis/architecture-process-review.md` in the project files.
+- **Voice stays on TCP for now (owner, 2026-10-11).** TCP stalls briefly on a
+  lost packet; a UDP path (with automatic fallback to the WebSocket, ~500-800
+  lines plus a small encryption crate) would hide losses instead. Not built
+  because nobody has noticed drops yet and the home tunnel can't carry UDP.
+  Revisit if friends hear voice cut out and catch up, or before screen
+  sharing. WebRTC and QUIC were rejected as too heavy.

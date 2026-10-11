@@ -17,7 +17,7 @@ SUDO=""; [ "$(id -u)" = 0 ] || SUDO="sudo"
 pkgs=(build-essential pkg-config cmake libasound2-dev openssl unzip curl
       gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 rustc-1.91 cargo-1.91 rust-1.91-src
       wine wine64 xvfb xdotool imagemagick python3-pip
-      libxkbcommon-x11-0 libgl1-mesa-dri libegl1)
+      libxkbcommon-x11-0 libgl1-mesa-dri libegl1 openssh-client)
 missing=()
 for p in "${pkgs[@]}"; do dpkg -s "$p" >/dev/null 2>&1 || missing+=("$p"); done
 if [ ${#missing[@]} -gt 0 ]; then

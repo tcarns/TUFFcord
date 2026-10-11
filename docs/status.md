@@ -2,11 +2,12 @@
 
 Where things stand. Rewrite (don't append) at the end of each working session.
 
-**Last updated:** 2026-10-11. **Released:** 0.11.1. **0.11.2** pushed: draft waits for the owner's signature.
+**Last updated:** 2026-10-11. **Released:** 0.11.2 (signed, `release-check.sh` all OK).
 
 ## Waiting on the owner
-- 0.11.2 (performance): sign the draft and run Publish release. Then he can
-  check Settings' memory figure idle and in a call (no Windows numbers yet).
+- Optional: Settings' memory figure on his PC, idle and in a call (no
+  Windows numbers yet). Re-paste `analysis/cloud-env-setup.sh` into the cloud
+  environment (adds Xvfb/Mesa libs for the perf suite and openssh-client).
 - Rented server deferred (2026-10-11): development continues against his home
   Windows server. When he's ready he follows `docs/hosting.md`; `install.sh`
   hasn't run on a real VPS yet.
@@ -23,8 +24,7 @@ Review: `analysis/architecture-process-review.md` in the project files.
   Linux server returns argon2 memory (64 MB to 7 MB with 8 in voice).
   `tests/run.py perf` keeps budgets (CI runs it). Decision entry in
   `docs/decisions.md`.
-- Under discussion with the owner: item 4, a UDP voice path before any
-  screen sharing (TCP stalls on packet loss; the home tunnel can't carry UDP).
+- Item 4 (UDP voice): owner keeps TCP for now; see `docs/decisions.md`.
 - Small, not started: Settings redraws every 60 ms while open (only the mic
   meter needs it); `opt-level = "s"` for UI crates (~2 MB); text and voice
   share the server's 512-slot send queue.
