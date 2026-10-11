@@ -204,8 +204,8 @@ impl App {
             LoginMode::Create => {
                 if self.s.name.trim().chars().count() < 2 {
                     self.login_error = Some("Names need at least 2 characters.".into());
-                } else if password.chars().count() < 6 {
-                    self.login_error = Some("Passwords need at least 6 characters.".into());
+                } else if password.chars().count() < 8 {
+                    self.login_error = Some("Passwords need at least 8 characters.".into());
                 } else if password != self.acct.confirm {
                     self.login_error = Some("The two passwords don't match.".into());
                 } else {
@@ -643,7 +643,7 @@ impl App {
         small_field(ui, "Current password", &mut self.acct.old_pw, true, FORM_W);
         small_field(
             ui,
-            "New password (at least 6 characters)",
+            "New password (at least 8 characters)",
             &mut self.acct.new_pw,
             true,
             FORM_W,
@@ -748,8 +748,8 @@ impl App {
     }
 
     fn check_new_password(&self) -> Option<String> {
-        if self.acct.new_pw.chars().count() < 6 {
-            Some("Passwords need at least 6 characters.".into())
+        if self.acct.new_pw.chars().count() < 8 {
+            Some("Passwords need at least 8 characters.".into())
         } else if self.acct.new_pw != self.acct.new_pw2 {
             Some("The two new passwords don't match.".into())
         } else {
@@ -944,7 +944,7 @@ impl App {
                 .wrap(),
             );
             ui.add_space(10.0);
-            small_field(ui, "New password (at least 6 characters)", &mut self.acct.new_pw, true, DIALOG_W);
+            small_field(ui, "New password (at least 8 characters)", &mut self.acct.new_pw, true, DIALOG_W);
             let r = small_field(ui, "New password again", &mut self.acct.new_pw2, true, DIALOG_W);
             if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
                 save = true;

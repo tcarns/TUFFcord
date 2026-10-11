@@ -26,6 +26,13 @@ ufw allow OpenSSH >/dev/null
 ufw allow 80/tcp >/dev/null
 ufw allow 443/tcp >/dev/null
 ufw --force enable >/dev/null
+# SSH with keys only (the hosting guide adds yours when the server is made).
+if [ -s /root/.ssh/authorized_keys ]; then
+  mkdir -p /etc/ssh/sshd_config.d
+  printf 'PasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitRootLogin prohibit-password\n' \
+    > /etc/ssh/sshd_config.d/10-tuffcord.conf
+  systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
+fi
 
 echo "== TUFFcord server in $dir"
 id tuffcord >/dev/null 2>&1 || useradd --system --home-dir "$dir" --shell /usr/sbin/nologin tuffcord
@@ -41,6 +48,10 @@ if [ ! -x "$dir/TUFFcord-server" ]; then
 fi
 "$dir/TUFFcord-server" --version
 chown -R tuffcord:tuffcord "$dir"
+# The settings file holds the group password; accounts and files are private too.
+chmod 750 "$dir"
+[ -f "$dir/TUFFcord-server.toml" ] && chmod 600 "$dir/TUFFcord-server.toml"
+[ -d "$dir/data" ] && chmod 700 "$dir/data"
 
 # Only Caddy talks to the server (HOST=127.0.0.1); it updates itself (the
 # watcher restarts it), and systemd restarts it if it stops.
@@ -58,6 +69,9 @@ Environment=HOST=127.0.0.1 NO_COLOR=1
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=yes
+# A runaway server is restarted instead of taking SSH down with it.
+MemoryMax=1G
+UMask=0077
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
@@ -71,7 +85,12 @@ UNIT
 port=$(grep -E '^port *= *[0-9]+' "$dir/TUFFcord-server.toml" 2>/dev/null | grep -oE '[0-9]+' || echo 3000)
 cat > /etc/caddy/Caddyfile <<CADDY
 $domain {
-	reverse_proxy 127.0.0.1:$port
+	reverse_proxy 127.0.0.1:$port {
+		# The server trusts this header from local proxies (it's how the
+		# Cloudflare tunnel says who's connecting). Here nothing in front sets
+		# it, so drop whatever a visitor sends; X-Forwarded-For comes from Caddy.
+		header_up -CF-Connecting-IP
+	}
 }
 CADDY
 

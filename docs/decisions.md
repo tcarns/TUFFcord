@@ -66,3 +66,13 @@ Settled choices and why. Add one when a choice would otherwise be revisited.
 - **Animations repaint only while moving.** The member list slides in 150 ms
   with `animate_bool_with_time_and_easing`, which asks for frames only until
   it reaches its end; the app stays idle otherwise.
+- **Security pass (0.10.1, report in project files `analysis/security-review.md`).**
+  Owner rule instead of a new role list: the first admin is the owner, other
+  admins can't act on admins, only the owner (or the server window) gives or
+  takes admin. Old apps from before accounts no longer get read-only "guest"
+  access with the group password. Password hashes run two at a time
+  (`limits.rs`); wrong passwords count before the hash, per address and per
+  name (the account's last address is exempt so strangers can't lock the owner
+  out). Per-person daily upload cap (3 GB default). VPS Caddyfile drops
+  `CF-Connecting-IP` (only the Cloudflare tunnel may set it). Not done: E2E
+  encryption, 2FA for all, fail2ban (cost over benefit for one friend group).

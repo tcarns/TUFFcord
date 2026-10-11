@@ -53,6 +53,8 @@ pub struct Files {
     pub stored: u64,
     /// Recent upload starts per account, for the per-minute limit.
     starts: HashMap<u32, Vec<Instant>>,
+    /// Bytes each account started sending in the last day: (since, bytes).
+    today: HashMap<u32, (Instant, u64)>,
 }
 
 impl Files {
@@ -204,7 +206,7 @@ fn who(st: &State, req: &Request) -> Option<(u32, u32)> {
     let key = req.header("authorization")?.strip_prefix("Bearer ")?.trim();
     let conn = *st.files.keys.get(key)?;
     let c = st.clients.get(&conn)?;
-    if !c.authed || c.guest {
+    if !c.authed {
         return None;
     }
     Some((conn, c.account?))
@@ -463,6 +465,26 @@ fn start_upload(
             "That file is bigger than all the space the server keeps for files.".into(),
         ));
     }
+    let per_day = st.cfg.max_upload_bytes_per_day;
+    let today = st.files.today.entry(account).or_insert((now, 0));
+    if now.duration_since(today.0) > Duration::from_secs(24 * 3600) {
+        *today = (now, 0);
+    }
+    if per_day > 0 && today.1 + new.size > per_day {
+        warn!(
+            "files",
+            "{name} reached the daily limit for sending files ({})",
+            files::size_label(per_day)
+        );
+        return Err((
+            429,
+            "daily_limit",
+            format!(
+                "You've sent {} of files today, the most this server allows in a day. Try again tomorrow.",
+                files::size_label(today.1)
+            ),
+        ));
+    }
     if recent >= UPLOADS_PER_MINUTE || open >= MAX_OPEN_UPLOADS {
         warn!("files", "{name} is sending files too fast");
         return Err((
@@ -472,6 +494,9 @@ fn start_upload(
         ));
     }
     st.files.starts.entry(account).or_default().push(now);
+    if let Some(t) = st.files.today.get_mut(&account) {
+        t.1 += new.size;
+    }
     let id = random_id();
     let clean = files::clean_name(&new.name);
     debug!(
@@ -508,6 +533,17 @@ async fn receive(stream: &mut TcpStream, req: &Request, body: Vec<u8>, id: &str,
         .query_param("offset")
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
+    // Strangers don't get to make the server read (and hold) a body.
+    if who(&shared.lock().unwrap(), req).is_none() {
+        return error(
+            stream,
+            req,
+            401,
+            "signed_out",
+            "Sign in again to send files.",
+        )
+        .await;
+    }
     // A piece either says its length (then it's written as it arrives) or comes
     // chunked through a proxy (then it's read whole first; pieces are small).
     let (len, body) = match body_size(req) {
@@ -809,9 +845,6 @@ pub fn post(st: &mut State, conn: u32, channel: &str, text: &str, list: Vec<Post
     let (Some(account), name) = (c.account, c.name.clone()) else {
         return;
     };
-    if c.guest {
-        return;
-    }
     if !st.cfg.text_channels.iter().any(|ch| ch == channel) {
         return fail(st, "That channel doesn't exist.");
     }

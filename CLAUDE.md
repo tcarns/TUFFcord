@@ -44,7 +44,7 @@ time; hosting at home must keep working.
   voice relay, console commands; `history.rs` recent messages, archive of older
   ones (`data/history/*.jsonl`), `loadOlder`, deleting messages; `storage.rs`
   file storage limit, admins' storage warning; `auth.rs` sign-in, admin
-  actions; `channels.rs` admins adding, renaming, deleting, reordering channels; `accounts.rs` storage (argon2); `files.rs` HTTP endpoints on the same
+  actions (owner rule); `limits.rs` wrong-password counts, hash and connection caps; `channels.rs` admins adding, renaming, deleting, reordering channels; `accounts.rs` storage (argon2); `files.rs` HTTP endpoints on the same
   port (POST/PUT/GET /files, Range, chunked bodies); `selfupdate.rs` watcher +
   updater; `config.rs` settings file and its upgrades; `log.rs`.
 - `client/src/` egui 0.32 (glow). The `App` struct is split across files,

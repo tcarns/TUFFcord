@@ -159,7 +159,11 @@ pub fn clean_name(name: &str) -> String {
     let cleaned: String = base
         .chars()
         .map(|c| {
-            if c.is_control() || matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*') {
+            // Bidi controls too: "photo\u{202E}gpj.exe" would show as "photoexe.jpg".
+            if c.is_control()
+                || matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*')
+                || matches!(c, '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+            {
                 '_'
             } else {
                 c
@@ -227,6 +231,14 @@ pub fn runs_code(name: &str) -> bool {
             | "application"
             | "msc"
             | "url"
+            | "msp"
+            | "scf"
+            | "chm"
+            | "iso"
+            | "img"
+            | "vhd"
+            | "vhdx"
+            | "xll"
     )
 }
 
@@ -275,6 +287,8 @@ mod tests {
         assert_eq!(clean_name("C:\\Users\\me\\clip.mp4"), "clip.mp4");
         assert_eq!(clean_name("a<b>:c?.txt"), "a_b__c_.txt");
         assert_eq!(clean_name("  ...  "), "file");
+        assert_eq!(clean_name("photo\u{202E}gpj.exe"), "photo_gpj.exe");
+        assert!(runs_code("photo\u{202E}gpj.exe") && runs_code("disk.ISO"));
         assert!(clean_name(&format!("{}.mp4", "x".repeat(300))).ends_with("x.mp4"));
         assert_eq!(extension("Clip.MP4"), "mp4");
         assert_eq!(extension("archive.tar.gz"), "gz");

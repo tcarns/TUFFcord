@@ -2,6 +2,18 @@
 
 Each version's section becomes the notes on its GitHub release, which the app shows when an update is available.
 
+## 0.10.1
+
+Security update. Update your server too: most of the protection is in it.
+
+- The server is much harder to attack from the internet: it limits how many password checks run at once and how many connections strangers can open, so it can't be run out of memory, and guesses sent all at once still count toward the wrong-password limit.
+- Too many wrong passwords for one account (from any addresses) pauses sign-ins to it for an hour, except from the computer that last signed in to it.
+- New passwords need at least 8 characters. Existing passwords keep working.
+- The group password alone no longer lets very old apps (from before accounts) read the chat. You need an account.
+- The admin who set up the server (the first admin) is now its owner. Other admins can't remove the owner's admin, reset the owner's password, or kick, ban or delete any admin. Only the owner can make or remove admins. The server window's `owner <name>` hands it on.
+- Each person can send up to 3 GB of files a day (server setting `max_upload_mb_per_day`), so one account can't push everyone's older files out.
+- Very large images someone sends are no longer opened, so they can't make your app use a lot of memory. More kinds of program files (.iso, .img, .vhd, .chm and others) ask before opening, and file names can't hide their real type with right-to-left text.
+
 ## 0.10.0
 
 - Chat history is kept for good. Scroll to the top of a channel and older messages load in; "This is the start of #channel" shows when there's nothing older. Files in older messages stay too. (Needs the server to be 0.10.0. Older servers keep only the last 300 messages per channel, as before.)

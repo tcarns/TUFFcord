@@ -11,6 +11,7 @@ mod channels;
 mod config;
 mod files;
 mod history;
+mod limits;
 mod selfupdate;
 mod storage;
 
@@ -56,8 +57,6 @@ struct Client {
     admin: bool,
     /// The saved sign-in this connection used or was given (for "sign out").
     token_hash: Option<String>,
-    /// An app from before accounts: can read, but not chat or talk.
-    guest: bool,
     /// For file transfers over HTTP (handed out in Welcome).
     file_key: Option<String>,
 }
@@ -72,8 +71,8 @@ struct State {
     /// What admins were last told about storage (see `storage`).
     storage_warning: Option<(String, bool)>,
     accounts: accounts::Store,
-    /// Recent wrong passwords, by address.
-    failures: HashMap<String, VecDeque<Instant>>,
+    /// Recent wrong passwords, by address and by name.
+    failures: limits::Failures,
     /// Uploads in progress, file keys, storage use.
     files: files::Files,
     next_id: u32,
@@ -285,20 +284,6 @@ fn handle_text(shared: &Shared, id: u32, text: &str) -> Option<ClientMsg> {
     let mut st = shared.lock().unwrap();
     let authed = st.clients.get(&id).map(|c| c.authed).unwrap_or(false);
     if !authed && !matches!(msg, ClientMsg::Hello { .. } | ClientMsg::Ping { .. }) {
-        return None;
-    }
-    let guest = st.clients.get(&id).is_some_and(|c| c.guest);
-    if guest
-        && !matches!(
-            msg,
-            ClientMsg::Ping { .. }
-                | ClientMsg::Report { .. }
-                | ClientMsg::GetAttachment { .. }
-                | ClientMsg::LeaveVoice
-                | ClientMsg::Status { .. }
-        )
-    {
-        st.send(id, &auth::update_required());
         return None;
     }
     match msg {
@@ -609,6 +594,14 @@ fn handle_voice(shared: &Shared, id: u32, frame: &[u8]) {
 // ---------------------------------------------------------------- connections
 
 async fn handle_connection(mut stream: TcpStream, addr: SocketAddr, shared: Shared) {
+    let Some(_slot) = limits::Slot::take() else {
+        debug!(
+            "conn",
+            "Turned away a connection from {}: too many open",
+            addr.ip()
+        );
+        return;
+    };
     let _ = stream.set_nodelay(true);
     let (req, leftover) = match files::read_head(&mut stream).await {
         Ok(r) => r,
@@ -640,6 +633,21 @@ async fn handle_connection(mut stream: TcpStream, addr: SocketAddr, shared: Shar
         files::handle(stream, req, leftover, ip, shared).await;
         return;
     }
+    {
+        let st = shared.lock().unwrap();
+        let waiting = st
+            .clients
+            .values()
+            .filter(|c| !c.authed && c.ip == ip)
+            .count();
+        if waiting >= limits::MAX_UNSIGNED_PER_IP {
+            debug!(
+                "conn",
+                "Turned away {ip}: too many connections that haven't signed in"
+            );
+            return;
+        }
+    }
     let Some(key) = req.header("sec-websocket-key") else {
         debug!(
             "conn",
@@ -661,7 +669,7 @@ async fn handle_connection(mut stream: TcpStream, addr: SocketAddr, shared: Shar
         stream,
         leftover,
         Role::Server,
-        None,
+        Some(limits::websocket_config()),
     )
     .await;
     let (mut sink, mut stream) = ws.split();
@@ -693,7 +701,6 @@ async fn handle_connection(mut stream: TcpStream, addr: SocketAddr, shared: Shar
                 account: None,
                 admin: false,
                 token_hash: None,
-                guest: false,
                 file_key: None,
             },
         );
@@ -825,10 +832,6 @@ fn clean_file_name(name: &str) -> String {
 fn handle_upload(shared: &Shared, id: u32, frame: &[u8]) {
     let mut st = shared.lock().unwrap();
     if !st.clients.get(&id).is_some_and(|c| c.authed) {
-        return;
-    }
-    if st.clients.get(&id).is_some_and(|c| c.guest) {
-        st.send(id, &auth::update_required());
         return;
     }
     let name = st.who(id);
@@ -1178,7 +1181,7 @@ async fn run(cfg: Arc<Config>) {
         archive,
         storage_warning: None,
         accounts,
-        failures: HashMap::new(),
+        failures: limits::Failures::default(),
         files: files::Files::new(stored),
         next_id: 0,
         next_voice_order: 0,

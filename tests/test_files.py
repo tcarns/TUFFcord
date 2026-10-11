@@ -11,11 +11,11 @@ async def run():
     s = Server(group=GROUP, MAX_ATTACHMENT_MB=3, MAX_STORAGE_MB=5)
     http, upload = s.http, s.upload
     note("Signing in")
-    alice, w = await s.register("Alice", "secret1")
+    alice, w = await s.register("Alice", "secret12")
     check(w and w["type"] == "welcome" and w.get("fileKey") and "files" in w["features"], "welcome has a file key and the files feature")
     check(w and [m["name"] for m in w.get("members", [])] == ["Alice"], "welcome lists members")
     key = w["fileKey"]
-    bob, wb = await s.register("Bob", "secret1")
+    bob, wb = await s.register("Bob", "secret12")
     m = await alice.wait("members")
     check(m and [x["name"] for x in m["list"]] == ["Alice", "Bob"], "everyone hears about a new member")
     bob_key = wb["fileKey"]
@@ -47,6 +47,8 @@ async def run():
     check(st == 409 and json.loads(b)["received"] == 0, "a piece in the wrong place gets 409 + where to resume")
     st, _, b = http("PUT", f"/files/{aid}?offset=0", bob_key, b"12345")
     check(st == 403, "someone else can't add to your upload")
+    st, _, b = http("PUT", f"/files/{aid}?offset=0", None, b"12345")
+    check(st == 401, "no key: a piece is refused before its body is read")
 
     note("Posting")
     await bob.ws.send(json.dumps({"type": "post", "channel": "general", "text": "look",
@@ -100,12 +102,21 @@ async def run():
     note("After a restart")
     await asyncio.sleep(1.5)  # history is saved once a second
     s.restart()
-    _, w = await s.login("Alice", "secret1")
+    _, w = await s.login("Alice", "secret12")
     atts = [a for m in w["history"]["general"] for a in m.get("attachments", [])]
     check(any(a.get("expired") for a in atts) and any(not a.get("expired") for a in atts), "expired marks survive a restart")
     leftovers = [f for f in os.listdir(att_dir) if f.endswith(".part") or f == aid]
     check(not leftovers, "unfinished uploads are cleaned up at start")
     s.stop()
+
+    note("Daily limit per person")
+    d = Server(name="daily", group=GROUP, MAX_UPLOAD_MB_PER_DAY=1)
+    _, w = await d.register("Dana", "secret12")
+    st, r = d.upload(w["fileKey"], "a.bin", os.urandom(600_000))
+    check(st == 200 and r["done"], "under the daily limit: uploads")
+    st, r = d.upload(w["fileKey"], "b.bin", os.urandom(600_000))
+    check(st == 429 and r["code"] == "daily_limit", "over it: refused until tomorrow")
+    d.stop()
 
 
 

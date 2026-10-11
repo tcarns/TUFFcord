@@ -2337,7 +2337,7 @@ checksum = "3d595e54a326bc53c1c197b32d295e14b169e3cfeaa8dc82b529f947fba6bcf5"
 
 [[package]]
 name = "proto"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -3108,7 +3108,7 @@ checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
 
 [[package]]
 name = "tuffcord"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "arboard",
  "chrono",
@@ -3135,7 +3135,7 @@ dependencies = [
 
 [[package]]
 name = "tuffcord-server"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "argon2",
  "chrono",

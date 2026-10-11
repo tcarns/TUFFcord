@@ -133,9 +133,23 @@ pub fn prepare_file(path: &Path, max_bytes: u64) -> Result<Prepared, String> {
     prepare(bytes, name, max_bytes)
 }
 
+/// Limits for decoding images other people sent: a tiny file can claim to be
+/// huge, and the decoder would set aside memory for all of it.
+fn received_limits() -> image::Limits {
+    let mut l = image::Limits::default();
+    l.max_image_width = Some(8192);
+    l.max_image_height = Some(8192);
+    l.max_alloc = Some(160 * 1024 * 1024);
+    l
+}
+
 /// Decode an image to fit within max_w by max_h pixels (never upscaled).
 pub fn decode_fit(bytes: &[u8], max_w: u32, max_h: u32) -> Result<ColorImage, String> {
-    let img = image::load_from_memory(bytes).map_err(|e| e.to_string())?;
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|e| e.to_string())?;
+    reader.limits(received_limits());
+    let img = reader.decode().map_err(|e| e.to_string())?;
     let img = if img.width() > max_w || img.height() > max_h {
         img.resize(max_w.max(1), max_h.max(1), FilterType::Triangle)
     } else {
@@ -178,9 +192,12 @@ pub fn decode_gif(
     max_h: u32,
     budget: usize,
 ) -> Result<Vec<(ColorImage, u32)>, String> {
-    use image::AnimationDecoder;
+    use image::{AnimationDecoder, ImageDecoder};
     let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
-    let decoder = image::codecs::gif::GifDecoder::new(std::io::BufReader::new(file))
+    let mut decoder = image::codecs::gif::GifDecoder::new(std::io::BufReader::new(file))
+        .map_err(|e| e.to_string())?;
+    decoder
+        .set_limits(received_limits())
         .map_err(|e| e.to_string())?;
     let mut out = Vec::new();
     let mut used = 0usize;
@@ -224,8 +241,20 @@ pub fn open_externally(id: &str, name: &str, bytes: &[u8]) -> Result<(), String>
             }
         })
         .collect();
-    let path = dir.join(format!("{}-{safe}", &id[..id.len().min(8)]));
+    // The extension comes from what the bytes are, never the sender's name
+    // (an image named x.hta would open in a script host).
+    let ext = match proto::sniff_image(bytes) {
+        Some("image/jpeg") => "jpg",
+        Some("image/gif") => "gif",
+        Some("image/webp") => "webp",
+        Some(_) => "png",
+        None => return Err("that isn't an image".into()),
+    };
+    let stem = safe.rsplit_once('.').map_or(safe.as_str(), |(s, _)| s);
+    let short: String = id.chars().take(8).collect();
+    let path = dir.join(format!("{short}-{stem}.{ext}"));
     std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+    crate::files::mark_downloaded(&path);
     #[cfg(windows)]
     let result = std::process::Command::new("explorer").arg(&path).spawn();
     #[cfg(not(windows))]
@@ -414,5 +443,7 @@ mod tests {
         let bytes = png(100, 50, false);
         assert_eq!(decode_fit(&bytes, 400, 300).unwrap().size, [100, 50]);
         assert_eq!(decode_fit(&bytes, 50, 50).unwrap().size, [50, 25]);
+        // A small file claiming to be huge isn't decoded.
+        assert!(decode_fit(&png(9000, 2, false), 400, 300).is_err());
     }
 }

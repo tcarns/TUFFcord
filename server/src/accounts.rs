@@ -11,7 +11,7 @@ use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-pub const MIN_PASSWORD: usize = 6;
+pub const MIN_PASSWORD: usize = 8;
 pub const MAX_PASSWORD: usize = 128;
 pub const MAX_NAME: usize = 32;
 /// Saved sign-ins unused this long stop working.
@@ -36,6 +36,10 @@ pub struct Account {
     pub admin: bool,
     #[serde(default)]
     pub banned: bool,
+    /// The one admin other admins can't act on; only they (and the server
+    /// window) can give or take admin, or reset or delete another admin.
+    #[serde(default)]
+    pub owner: bool,
     /// Signed in with a temporary password from an admin; must pick a new one.
     #[serde(default)]
     pub must_change_password: bool,
@@ -177,11 +181,47 @@ impl Store {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => FileData::default(),
             Err(e) => return Err(format!("Couldn't read {} ({e}).", path.display())),
         };
-        Ok(Store {
+        let mut store = Store {
             path,
             data,
             dirty: false,
-        })
+        };
+        store.ensure_owner();
+        Ok(store)
+    }
+
+    /// Servers from before 0.10.1 have admins but no owner: the first admin
+    /// (the one who made themselves admin from the server window) becomes it.
+    /// Also after the owner's account was deleted.
+    pub fn ensure_owner(&mut self) {
+        if self.data.accounts.iter().any(|a| a.owner) {
+            return;
+        }
+        if let Some(a) = self
+            .data
+            .accounts
+            .iter_mut()
+            .filter(|a| a.admin)
+            .min_by_key(|a| a.id)
+        {
+            a.owner = true;
+            self.dirty = true;
+        }
+    }
+
+    pub fn owner(&self) -> Option<u32> {
+        self.data.accounts.iter().find(|a| a.owner).map(|a| a.id)
+    }
+
+    /// Make `id` the owner (and an admin); the previous owner stays an admin.
+    pub fn set_owner(&mut self, id: u32) {
+        for a in &mut self.data.accounts {
+            a.owner = a.id == id;
+            if a.owner {
+                a.admin = true;
+            }
+        }
+        self.dirty = true;
     }
 
     pub fn save(&mut self) -> Result<(), String> {
@@ -251,6 +291,7 @@ impl Store {
             password_hash,
             admin: false,
             banned: false,
+            owner: false,
             must_change_password: false,
             created: now,
             last_seen: now,
@@ -321,8 +362,8 @@ mod tests {
         assert!(clean_name("tab\there").is_ok()); // whitespace collapses to a space
         assert!(clean_name("no<html>").is_err());
         assert!(clean_name(&"x".repeat(33)).is_err());
-        assert!(check_password("12345").is_err());
-        assert!(check_password("123456").is_ok());
+        assert!(check_password("1234567").is_err());
+        assert!(check_password("12345678").is_ok());
     }
 
     #[test]
@@ -337,6 +378,15 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let mut s = Store::load(&dir).unwrap();
         let id = s.create("Sam", h, "1.2.3.4", 1000);
+        let other = s.create("Pat", hash_password("patpass11"), "", 1000);
+        assert_eq!(s.owner(), None);
+        s.get_mut(other).unwrap().admin = true;
+        s.ensure_owner();
+        assert_eq!(s.owner(), Some(other), "the first admin becomes the owner");
+        s.set_owner(id);
+        assert!(s.get(id).unwrap().admin && !s.get(other).unwrap().owner);
+        s.set_owner(other);
+        s.get_mut(id).unwrap().admin = false;
         assert!(s.name_taken("sam", None));
         assert!(!s.name_taken("SAM", Some(id)));
         assert_eq!(s.by_name("  SAM ").unwrap().id, id);
@@ -362,7 +412,7 @@ mod tests {
 
         s.save().unwrap();
         let again = Store::load(&dir).unwrap();
-        assert_eq!(again.all().len(), 1);
+        assert_eq!(again.all().len(), 2);
         assert_eq!(again.all()[0].tokens.len(), MAX_TOKENS);
         std::fs::write(Store::path_in(&dir), "{oops").unwrap();
         assert!(Store::load(&dir).is_err());

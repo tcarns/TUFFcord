@@ -29,6 +29,8 @@ pub struct Config {
     pub max_attachment_bytes: u64,
     /// Most space all sent files may use together.
     pub max_storage_bytes: u64,
+    /// Most one person can send in a day (0 = no limit).
+    pub max_upload_bytes_per_day: u64,
     pub config_path: PathBuf,
     /// Notes to log once logging is running (first-run messages, bad values).
     pub notes: Vec<(Level, String)>,
@@ -53,6 +55,7 @@ struct FileConfig {
     allow_signup: Option<bool>,
     max_attachment_mb: Option<u64>,
     max_storage_mb: Option<u64>,
+    max_upload_mb_per_day: Option<u64>,
 }
 
 fn base_dir() -> PathBuf {
@@ -102,6 +105,10 @@ max_attachment_mb = 100
 # oldest files are deleted to make room (their messages stay, marked "expired").
 # Admins are warned in the app from 80% (and when the disk is 80% full).
 max_storage_mb = 5120
+
+# Most one person can send in a day, in megabytes (0 = no limit). Stops one
+# account from pushing everyone's older files out.
+max_upload_mb_per_day = 3072
 
 # How much to log: trace, debug, info, warn, error, critical.
 # You can also change it while the server runs by typing: level debug
@@ -496,8 +503,20 @@ pub fn load() -> Config {
         .or(file.max_storage_mb)
         .unwrap_or(5120)
         .max(max_attachment_mb);
+    if password.is_empty() && allow_signup {
+        notes.push((Level::Warn, "The group password is empty, so anyone who knows this server's address can create an account. Set password in the settings file, or allow_signup = false.".into()));
+    }
+    let max_upload_mb_per_day = parse_num(
+        "MAX_UPLOAD_MB_PER_DAY",
+        env("MAX_UPLOAD_MB_PER_DAY"),
+        &mut notes,
+    )
+    .map(|n| n as u64)
+    .or(file.max_upload_mb_per_day)
+    .unwrap_or(3072);
 
     Config {
+        max_upload_bytes_per_day: max_upload_mb_per_day * 1024 * 1024,
         max_attachment_bytes: max_attachment_mb * 1024 * 1024,
         max_storage_bytes: max_storage_mb * 1024 * 1024,
         check_updates,

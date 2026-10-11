@@ -85,6 +85,7 @@ the group password) and `data\` (accounts, messages, files).
    Ctrl+O, Enter, Ctrl+X to save.
 5. ```
    chown -R tuffcord:tuffcord /opt/tuffcord
+   chmod 600 /opt/tuffcord/TUFFcord-server.toml; chmod 700 /opt/tuffcord/data
    systemctl start tuffcord
    journalctl -u tuffcord -n 20
    ```

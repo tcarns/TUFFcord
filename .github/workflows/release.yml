@@ -25,9 +25,11 @@ jobs:
     # the rented server's (Ubuntu 24.04).
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0  # tags, to build the previous release for the version checks
+          # Steps that publish get the token explicitly; nothing else needs it on disk.
+          persist-credentials: false
 
       - name: Is this version already released?
         id: version
@@ -52,14 +54,14 @@ jobs:
         if: steps.version.outputs.new == 'true'
         run: rustup target add x86_64-pc-windows-gnu
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         if: steps.version.outputs.new == 'true'
 
       - name: Run the tests
         if: steps.version.outputs.new == 'true'
         run: cargo test --workspace
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         if: steps.version.outputs.new == 'true'
         with:
           python-version: "3.12"

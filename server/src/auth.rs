@@ -5,7 +5,7 @@
 //! with the state unlocked; voice keeps flowing for everyone meanwhile.
 
 use crate::accounts::{self, Store};
-use crate::{config, leave_voice, now_ms, Shared, State};
+use crate::{config, leave_voice, limits, now_ms, Shared, State};
 use proto::{Account, AccountSummary, AdminAction, Auth, Member, ServerMsg, FEATURE_ACCOUNTS};
 use proto::{
     FEATURE_ATTACHMENTS, FEATURE_CHANNELS, FEATURE_CHANNEL_EDIT, FEATURE_FILES,
@@ -13,10 +13,6 @@ use proto::{
 };
 use std::time::{Duration, Instant};
 use tokio_tungstenite::tungstenite::Message;
-
-/// Wrong passwords allowed from one address in `FAILURE_WINDOW`.
-const MAX_FAILURES: usize = 10;
-const FAILURE_WINDOW: Duration = Duration::from_secs(10 * 60);
 
 // ---------------------------------------------------------------- helpers on State
 
@@ -113,30 +109,6 @@ impl State {
             let _ = tx.try_send(Message::Text(text.into()));
             let _ = tx.try_send(Message::Close(None));
         }
-    }
-
-    fn record_failure(&mut self, ip: &str) {
-        let list = self.failures.entry(ip.to_string()).or_default();
-        list.push_back(Instant::now());
-        while list.len() > MAX_FAILURES * 2 {
-            list.pop_front();
-        }
-    }
-
-    fn too_many_failures(&mut self, ip: &str) -> bool {
-        let now = Instant::now();
-        self.failures.retain(|_, l| {
-            while l
-                .front()
-                .is_some_and(|t| now.duration_since(*t) > FAILURE_WINDOW)
-            {
-                l.pop_front();
-            }
-            !l.is_empty()
-        });
-        self.failures
-            .get(ip)
-            .is_some_and(|l| l.len() >= MAX_FAILURES)
     }
 
     /// Disconnect every device signed in to `account`, telling them why.
@@ -244,64 +216,22 @@ impl State {
     }
 }
 
-impl State {
-    /// An app from before accounts, with the group password: it can look but not
-    /// chat or talk, and is asked to update (its update bar is on the main screen).
-    fn sign_in_guest(&mut self, conn: u32, name: &str) {
-        let base = crate::clean(name, 24);
-        let name = format!(
-            "{} (old app)",
-            if base.is_empty() { "Someone" } else { &base }
-        );
-        let Some(c) = self.clients.get_mut(&conn) else {
-            return;
-        };
-        c.authed = true;
-        c.guest = true;
-        c.name = name.clone();
-        c.signed_in_at = Instant::now();
-        let ip = c.ip.clone();
-        info!("conn", "{name} signed in from {ip} with an app from before accounts; asked to update ({} online)", self.online_count());
-        let welcome = ServerMsg::Welcome {
-            id: conn,
-            name,
-            app_name: self.cfg.app_name.clone(),
-            text_channels: self.cfg.text_channels.clone(),
-            voice_channels: self.cfg.voice_channels.clone(),
-            max_per_voice_channel: self.cfg.max_per_voice_channel,
-            history: self.history.clone(),
-            voice_state: self.voice_state(),
-            users: self.users(),
-            features: Vec::new(),
-            max_attachment_bytes: self.cfg.max_attachment_bytes,
-            account: None,
-            token: None,
-            must_change_password: false,
-            file_key: None,
-            members: Vec::new(),
-        };
-        self.send(conn, &welcome);
-        self.send(conn, &update_required());
-        self.broadcast_presence();
+/// Check a password with the wrong-password limits: the attempt counts as
+/// wrong until the (slow) check says otherwise, so guesses sent all at once
+/// can't slip past the limit.
+async fn checked_verify(
+    shared: &Shared,
+    ip: &str,
+    name: &str,
+    pw: String,
+    hash: Option<String>,
+) -> bool {
+    shared.lock().unwrap().failures.record(ip, Some(name));
+    let ok = limits::verify(pw, hash).await;
+    if ok {
+        shared.lock().unwrap().failures.forgive(ip, Some(name));
     }
-}
-
-/// What apps from before accounts are told when they try to chat or talk.
-pub fn update_required() -> ServerMsg {
-    ServerMsg::Error {
-        code: "update_required".into(),
-        message: "This server now has accounts. Click Update now at the top, then create your account. Until then you can read but not chat or talk.".into(),
-    }
-}
-
-fn hash_off_thread(pw: String) -> tokio::task::JoinHandle<String> {
-    tokio::task::spawn_blocking(move || accounts::hash_password(&pw))
-}
-
-async fn verify_off_thread(pw: String, hash: Option<String>) -> bool {
-    tokio::task::spawn_blocking(move || accounts::verify_password(&pw, hash.as_deref()))
-        .await
-        .unwrap_or(false)
+    ok
 }
 
 fn ct_eq(a: &[u8], b: &[u8]) -> bool {
@@ -345,7 +275,7 @@ pub async fn hello(
             );
             return;
         }
-        if st.too_many_failures(&ip) {
+        if st.failures.ip_blocked(&ip) {
             warn!(
                 "auth",
                 "Refused a sign-in from {ip}: too many wrong passwords recently"
@@ -390,12 +320,36 @@ pub async fn hello(
         }
         Some(Auth::Login) => {
             let found = {
-                let st = shared.lock().unwrap();
-                st.accounts
+                let mut st = shared.lock().unwrap();
+                let found = st
+                    .accounts
                     .by_name(&name)
-                    .map(|a| (a.id, a.password_hash.clone()))
+                    .map(|a| (a.id, a.password_hash.clone(), a.last_ip == ip));
+                let trusted = found.as_ref().is_some_and(|f| f.2);
+                if st.failures.name_blocked(&name, trusted) {
+                    warn!(
+                        "auth",
+                        "Refused a sign-in to \"{}\" from {ip}: too many wrong passwords for that name recently",
+                        crate::clean(&name, 40)
+                    );
+                    st.refuse(
+                        conn,
+                        "too_many_attempts",
+                        "Too many wrong passwords for this account. Wait an hour, or ask an admin to reset your password.",
+                        true,
+                    );
+                    return;
+                }
+                found.map(|f| (f.0, f.1))
             };
-            let ok = verify_off_thread(password, found.as_ref().map(|f| f.1.clone())).await;
+            let ok = checked_verify(
+                shared,
+                &ip,
+                &name,
+                password,
+                found.as_ref().map(|f| f.1.clone()),
+            )
+            .await;
             let mut st = shared.lock().unwrap();
             match found {
                 Some((id, _)) if ok => {
@@ -419,7 +373,6 @@ pub async fn hello(
                         "Wrong name or password from {ip} (name \"{}\")",
                         crate::clean(&name, 40)
                     );
-                    st.record_failure(&ip);
                     st.refuse(conn, "bad_login", "Wrong name or password.", true);
                 }
             }
@@ -456,7 +409,7 @@ async fn register(
                 "auth",
                 "Wrong group password from {ip} while creating an account"
             );
-            st.record_failure(ip);
+            st.failures.record(ip, None);
             st.refuse(
                 conn,
                 "bad_password",
@@ -489,7 +442,7 @@ async fn register(
         }
         name
     };
-    let Ok(hash) = hash_off_thread(new_password).await else {
+    let Some(hash) = limits::hash(new_password).await else {
         return;
     };
     let mut st = shared.lock().unwrap();
@@ -545,7 +498,9 @@ async fn legacy(
     };
     // Someone with an account using an older app: their own password works.
     if let Some((id, hash, banned)) = &found {
-        if !group_ok && verify_off_thread(password.clone(), Some(hash.clone())).await {
+        if !group_ok
+            && checked_verify(shared, ip, &name, password.clone(), Some(hash.clone())).await
+        {
             let mut st = shared.lock().unwrap();
             if *banned {
                 return st.refuse(
@@ -570,16 +525,9 @@ async fn legacy(
         } else if found.is_some() {
             // Older apps treat "bad_password" as final and stop retrying.
             st.refuse(conn, "bad_password", "This server now has accounts, and that name has one. Get the new TUFFcord with the link below, then sign in.", false);
-        } else if st.accounts.ip_banned(ip) {
-            st.refuse(
-                conn,
-                "bad_password",
-                "You can't sign in to this server.",
-                false,
-            );
         } else {
-            // Let older apps in just far enough to see their "Update now" button.
-            st.sign_in_guest(conn, &name);
+            // The group password alone doesn't let anyone read the chat.
+            st.refuse(conn, "bad_password", "This server now has accounts. Get the new TUFFcord with the link below, then create your account.", false);
         }
     } else {
         warn!(
@@ -587,7 +535,9 @@ async fn legacy(
             "Wrong password from {ip} (name \"{}\")",
             crate::clean(&name, 40)
         );
-        st.record_failure(ip);
+        if found.is_none() {
+            st.failures.record(ip, None);
+        }
         st.refuse(conn, "bad_password", "That password is not right.", true);
     }
 }
@@ -621,7 +571,7 @@ pub async fn change_password(shared: &Shared, conn: u32, old: String, new: Strin
         )
     };
     if let Some(hash) = hash {
-        if !verify_off_thread(old, Some(hash)).await {
+        if !limits::verify(old, Some(hash)).await {
             tokio::time::sleep(Duration::from_millis(800)).await;
             let st = shared.lock().unwrap();
             st.send(
@@ -634,7 +584,7 @@ pub async fn change_password(shared: &Shared, conn: u32, old: String, new: Strin
             return;
         }
     }
-    let Ok(new_hash) = hash_off_thread(new).await else {
+    let Some(new_hash) = limits::hash(new).await else {
         return;
     };
     let mut st = shared.lock().unwrap();
@@ -773,6 +723,19 @@ pub fn act(
     let name = t.name.clone();
     let (t_admin, t_banned) = (t.admin, t.banned);
     let is_self = actor == Some(target);
+    // Admins can't act on each other, so one stolen admin password can't take
+    // the server over: only the owner (and the server window) can.
+    let by_owner = actor.is_none() || actor == st.accounts.owner();
+    if !by_owner && !is_self {
+        if matches!(act, Act::SetAdmin(_)) {
+            return Err("Only the server's owner can give or take admin.".into());
+        }
+        if t_admin && matches!(act, Act::Kick | Act::ResetPassword { .. } | Act::Delete) {
+            return Err(format!(
+                "{name} is an admin. Only the server's owner can do that."
+            ));
+        }
+    }
     let result = match act {
         Act::Kick => {
             if is_self {
@@ -850,7 +813,12 @@ pub fn act(
             if !admin && st.accounts.admin_count() == 1 {
                 return Err("There has to be at least one admin.".into());
             }
-            st.accounts.get_mut(target).unwrap().admin = admin;
+            let a = st.accounts.get_mut(target).unwrap();
+            a.admin = admin;
+            if !admin {
+                a.owner = false;
+            }
+            st.accounts.ensure_owner();
             st.save_accounts();
             let me = Account {
                 id: target,
@@ -898,6 +866,7 @@ pub fn act(
             }
             st.disconnect_account(target, "session_expired", "Your account was deleted.", None);
             st.accounts.delete(target);
+            st.accounts.ensure_owner();
             st.save_accounts();
             warn!("admin", "{by} deleted {name}'s account");
             format!("Deleted {name}'s account. The name is free again.")
@@ -936,7 +905,7 @@ pub async fn admin(shared: &Shared, conn: u32, action: AdminAction) {
         AdminAction::SetAdmin { account, admin } => (account, Act::SetAdmin(admin)),
         AdminAction::ResetPassword { account } => {
             let temp = config::random_password();
-            let Ok(hash) = hash_off_thread(temp.clone()).await else {
+            let Some(hash) = limits::hash(temp.clone()).await else {
                 return;
             };
             secret = Some(temp);
@@ -961,6 +930,7 @@ pub async fn admin(shared: &Shared, conn: u32, action: AdminAction) {
 pub const CONSOLE_HELP: &str = "\
   users              list accounts
   admin <name>       make someone an admin (unadmin <name> to undo)
+  owner <name>       make someone the owner: the admin other admins can't act on
   kick <name>        disconnect them (they can sign back in)
   ban <name>         disconnect them and stop them signing in (unban <name> to undo)
   resetpw <name>     give them a temporary password
@@ -970,7 +940,7 @@ pub const CONSOLE_HELP: &str = "\
 pub fn console(shared: &Shared, cmd: &str, arg: &str) -> Option<String> {
     let needs_name = matches!(
         cmd,
-        "admin" | "unadmin" | "kick" | "ban" | "unban" | "resetpw" | "deluser"
+        "admin" | "unadmin" | "owner" | "kick" | "ban" | "unban" | "resetpw" | "deluser"
     );
     if cmd == "users" {
         let st = shared.lock().unwrap();
@@ -1019,6 +989,28 @@ pub fn console(shared: &Shared, cmd: &str, arg: &str) -> Option<String> {
             }
         }
     };
+    if cmd == "owner" {
+        let mut st = shared.lock().unwrap();
+        if !st.accounts.get(target).is_some_and(|a| a.admin) {
+            let _ = act(
+                &mut st,
+                None,
+                "The server admin",
+                target,
+                Act::SetAdmin(true),
+            );
+        }
+        st.accounts.set_owner(target);
+        st.save_accounts();
+        let name = st
+            .accounts
+            .get(target)
+            .map(|a| a.name.clone())
+            .unwrap_or_default();
+        warn!("admin", "The server admin made {name} the owner");
+        st.send_accounts_to_admins();
+        return Some(format!("{name} is now the owner (and an admin)."));
+    }
     let mut secret = None;
     let act_ = match cmd {
         "admin" => Act::SetAdmin(true),
