@@ -53,21 +53,98 @@ pub fn create(st: &State, conn: u32) {
     );
 }
 
-/// `invite` typed in the server console.
-pub fn console(shared: &Shared, cmd: &str) -> Option<String> {
-    if cmd != "invite" {
-        return None;
-    }
+/// `invite`, `invites` and `uninvite` typed in the server console.
+pub fn console(shared: &Shared, cmd: &str, arg: &str) -> Option<String> {
     let mut st = shared.lock().unwrap();
-    let code = match make(&mut st) {
+    match cmd {
+        "invite" => Some(invite(&mut st)),
+        "invites" => Some(list(&mut st)),
+        "uninvite" => Some(uninvite(&mut st, arg)),
+        _ => None,
+    }
+}
+
+fn invite(st: &mut State) -> String {
+    let code = match make(st) {
         Ok(x) => x,
-        Err(e) => return Some(e),
+        Err(e) => return e,
     };
-    admin_log!(&mut st, "The server console made an invite");
+    admin_log!(st, "The server console made an invite");
     if let Err(e) = st.accounts.save() {
         error!("auth", "{e}");
     }
-    Some(format!("Invite code: {code}\nIt creates one account and works for 24 hours. In the app: Create account, then paste it into \"Invite code\"."))
+    format!("Invite code: {code}\nIt creates one account and works for 24 hours. In the app: Create account, then paste it into \"Invite code\".")
+}
+
+/// Oldest first, so the numbers stay put as new ones are made.
+fn sorted(st: &mut State) -> Vec<Invite> {
+    prune(st);
+    let mut list = st.accounts.invites().clone();
+    list.sort_by_key(|i| i.expires);
+    list
+}
+
+fn list(st: &mut State) -> String {
+    let list = sorted(st);
+    if list.is_empty() {
+        return "No unused invites. Type \"invite\" to make one.".into();
+    }
+    let now = now_ms();
+    let lines: Vec<String> = list
+        .iter()
+        .enumerate()
+        .map(|(n, i)| {
+            let made = chrono::DateTime::from_timestamp_millis((i.expires - LIFETIME_MS) as i64)
+                .map(|t| {
+                    t.with_timezone(&chrono::Local)
+                        .format("%b %-d %H:%M")
+                        .to_string()
+                })
+                .unwrap_or_default();
+            let mins = (i.expires.saturating_sub(now) / 60_000).max(1);
+            let left = if mins >= 60 {
+                format!("{} h {} min", mins / 60, mins % 60)
+            } else {
+                format!("{mins} min")
+            };
+            format!("  {}. made {made}, {left} left", n + 1)
+        })
+        .collect();
+    format!(
+        "{} unused (codes aren't kept, so they can't be shown again):\n{}\nCancel one with \"uninvite <n>\", or all with \"uninvite all\".",
+        list.len(),
+        lines.join("\n")
+    )
+}
+
+fn uninvite(st: &mut State, arg: &str) -> String {
+    let list = sorted(st);
+    let gone: Vec<String> = if arg.eq_ignore_ascii_case("all") {
+        list.iter().map(|i| i.hash.clone()).collect()
+    } else {
+        match arg.parse::<usize>() {
+            Ok(n) if (1..=list.len()).contains(&n) => vec![list[n - 1].hash.clone()],
+            _ if list.is_empty() => return "No unused invites to cancel.".into(),
+            _ => return format!(
+                "Type \"uninvite <n>\" with n from 1 to {} (see \"invites\"), or \"uninvite all\".",
+                list.len()
+            ),
+        }
+    };
+    if gone.is_empty() {
+        return "No unused invites to cancel.".into();
+    }
+    st.accounts.invites().retain(|i| !gone.contains(&i.hash));
+    let what = if gone.len() == 1 {
+        "an invite".to_string()
+    } else {
+        format!("{} invites", gone.len())
+    };
+    admin_log!(st, "The server console cancelled {what}");
+    if let Err(e) = st.accounts.save() {
+        error!("auth", "{e}");
+    }
+    format!("Cancelled {what}. {} left.", list.len() - gone.len())
 }
 
 /// Is `code` an unused invite? (Doesn't use it up; see `redeem`.)

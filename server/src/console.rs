@@ -39,7 +39,7 @@ pub fn run(shared: &Shared, updates: &Updates, line: &str) -> Option<String> {
             let _ = updates.send(selfupdate::Request::Now);
             "Looking for a new version to install now.".into()
         }
-        other => invites::console(shared, other)
+        other => invites::console(shared, other, &arg)
             .or_else(|| admin::console(shared, other, &arg))
             .or_else(|| trash::console(shared, other, &arg))
             .unwrap_or_else(|| format!("Unknown command \"{cmd}\". Type \"help\" for the list.")),

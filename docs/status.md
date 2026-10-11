@@ -10,6 +10,14 @@ Where things stand. Rewrite (don't append) at the end of each working session.
   settings file no longer has `password`/`allow_signup` (the server takes them
   out on first start), and Settings > Account no longer has "Make an invite".
 
+## Ready for 0.12.1 (not released; owner signs later)
+- Console `invites` (numbered, made when, time left; codes are only stored
+  hashed, so not shown) and `uninvite <n>` / `uninvite all`. Both admin-logged.
+  Checked in `tests/test_security.py`.
+- To release: bump to 0.12.1, add to CHANGELOG: "The server window's
+  `invites` lists unused invites with their time left, and `uninvite <n>` or
+  `uninvite all` cancels them."
+
 ## Invite-only (0.12.0)
 - Group password removed: `auth.rs` register needs a valid invite; old apps
   sending name + password only get in with their account's own password.

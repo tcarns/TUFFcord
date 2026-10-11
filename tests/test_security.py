@@ -46,10 +46,19 @@ async def run():
     check(out.returncode == 0 and "already 10" in out.stdout, "...and invite too (still capped)")
     mode = os.stat(os.path.join(s2.dir, "data", "console.sock")).st_mode & 0o777
     check(mode == 0o600, "only the server's own user can send commands")
+    cmd = lambda *a: subprocess.run([s2.exe, *a], env=s2.env, capture_output=True, text=True, timeout=10).stdout
+    out = cmd("invites")
+    check(out.startswith("10 unused") and "10. made" in out and "h " in out and code not in out,
+          "invites lists the 10 unused ones with time left, without their codes")
+    check("Cancelled an invite. 9 left." in cmd("uninvite", "1") and cmd("invites").startswith("9 unused"), "uninvite <n> cancels one")
+    check("uninvite <n>" in cmd("uninvite", "42"), "...a wrong number is explained")
+    check("Cancelled 9 invites" in cmd("uninvite", "all") and "No unused invites" in cmd("invites"), "uninvite all cancels the rest")
 
     note("Look-alike names")
-    spare = re.findall(r"Invite code: (\w+)", s2.log())[-1]
-    _, r = await s2.register("Ownеr", "ownerpass1", invite=spare)
+    cancelled = re.findall(r"Invite code: (\w+)", s2.log())[-1]
+    _, r = await s2.register("Someone", "somepass1", invite=cancelled)
+    check(r and r["code"] == "bad_password", "a cancelled invite no longer works")
+    _, r = await s2.register("Ownеr", "ownerpass1")
     check(r and r["code"] == "bad_name", "a name mixing Latin and Cyrillic letters is refused")
 
     note("Signed-in devices")

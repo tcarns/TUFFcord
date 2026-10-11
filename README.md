@@ -67,7 +67,7 @@ The app's settings are saved in `%APPDATA%\TUFFcord\settings.json`.
 
 ## Accounts
 
-Everyone has their own account: a name nobody else can take, and their own password. New accounts need a one-time invite, made only in the server window (`invite`; on a Linux server, `tuffcord invite`). Each invite creates one account and works for 24 hours, and at most 10 can be waiting at once. Since 0.12 there is no group password.
+Everyone has their own account: a name nobody else can take, and their own password. New accounts need a one-time invite, made only in the server window (`invite`; on a Linux server, `tuffcord invite`). Each invite creates one account and works for 24 hours, and at most 10 can be waiting at once. `invites` lists the waiting ones (when made, time left; codes can't be shown again) and `uninvite <n>` or `uninvite all` cancels them. Since 0.12 there is no group password.
 
 - **Your account** (Settings, at the bottom): rename yourself, change your password, or sign out. Changing your password signs you out on your other computers.
 - **Keep me signed in** saves a sign-in key from the server in `settings.json`, not your password. Signing out deletes the key on the server too, so a copied `settings.json` stops working. Keys you don't use for 180 days expire.
