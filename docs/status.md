@@ -11,8 +11,8 @@ Where things stand. Rewrite (don't append) at the end of each working session.
 - From 0.11.1 he signs every release on his PC (`ssh-keygen -Y sign`,
   passphrase) and runs the Publish release workflow (`docs/releasing.md`).
   Key `tuffcord-sign` is on his PC only; public half is `RELEASE_KEY` in
-  `proto/src/update.rs`. The changeover job is removed; asked him to delete
-  the unused `RELEASE_SIGNING_KEY` secret / `release` environment.
+  `proto/src/update.rs`. The changeover job is removed and he deleted the
+  old `release` environment and its key.
 
 ## Security pass (0.10.1 and 0.11.0)
 Report with every finding: `analysis/security-review.md` in the project files.
