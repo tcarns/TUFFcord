@@ -5,11 +5,9 @@ Where things stand. Rewrite (don't append) at the end of each working session.
 **Last updated:** 2026-10-10. **Released:** 0.10.0 (app and server).
 
 ## Waiting on the owner
-- Setting up the rented server by following `docs/hosting.md` (buy domain,
-  Hetzner Ashburn VPS, run `deploy/install.sh`, copy `data/` and the settings
-  file, set `max_storage_mb = 30000`). Not done by Claude: no accounts or
-  purchases without him. `install.sh` was syntax-checked only; its first real
-  run is on his VPS (no systemd in the cloud workspace).
+- Nothing. Rented server deferred by the owner (2026-10-11): development
+  continues against his home Windows server. When he's ready he follows
+  `docs/hosting.md`; `install.sh` hasn't run on a real VPS yet.
 
 ## In 0.10.0
 - Full history: `server/src/history.rs` keeps the recent `history_limit` in
