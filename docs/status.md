@@ -5,10 +5,9 @@ Where things stand. Rewrite (don't append) at the end of each working session.
 **Last updated:** 2026-10-11. **Released:** 0.12.0 (signed, `release-check.sh` all OK).
 
 ## Waiting on the owner
-- Check 0.12.0 on his PC (his server installs it a day after release, or type
-  `update`): the server window's `invite` prints a code, Create account with it works, his
-  settings file no longer has `password`/`allow_signup` (the server takes them
-  out on first start), and Settings > Account no longer has "Make an invite".
+- 0.12.1 (console `invites`/`uninvite`) is on main, unreleased: bump and
+  sign when he asks (see below). 0.12.0 confirmed on his PC: console invite
+  and account creation with it work.
 
 ## Ready for 0.12.1 (not released; owner signs later)
 - Console `invites` (numbered, made when, time left; codes are only stored
