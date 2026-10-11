@@ -305,6 +305,7 @@ impl App {
                         rect.left_center() + egui::vec2(18.0, 0.0),
                         11.0,
                         &m.name,
+                        self.avatars.pic(ui.ctx(), &m.name),
                         talking,
                         pal().bg_deep,
                     );
@@ -437,6 +438,7 @@ impl App {
                 rect.center(),
                 15.0,
                 &me_name,
+                self.avatars.pic(ui.ctx(), &me_name),
                 talking,
                 pal().me_bg,
             );

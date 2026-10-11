@@ -5,17 +5,28 @@ Where things stand. Rewrite (don't append) at the end of each working session.
 **Last updated:** 2026-10-11. **Released:** 0.12.0 (signed, `release-check.sh` all OK).
 
 ## Waiting on the owner
-- 0.12.1 (console `invites`/`uninvite`) is on main, unreleased: bump and
-  sign when he asks (see below). 0.12.0 confirmed on his PC: console invite
-  and account creation with it work.
+- 0.12.1 (console `invites`/`uninvite`, profile pictures) is on main,
+  unreleased: bump and sign when he asks (see below). Profile pictures need
+  his look on Windows (Settings > Account > Choose picture…, then chat,
+  members, voice list).
 
 ## Ready for 0.12.1 (not released; owner signs later)
 - Console `invites` (numbered, made when, time left; codes are only stored
   hashed, so not shown) and `uninvite <n>` / `uninvite all`. Both admin-logged.
   Checked in `tests/test_security.py`.
-- To release: bump to 0.12.1, add to CHANGELOG: "The server window's
-  `invites` lists unused invites with their time left, and `uninvite <n>` or
-  `uninvite all` cancels them."
+- Profile pictures: the app crops the chosen image to a 64×64 PNG (16 KB cap)
+  and sends `PUT /avatar` (`DELETE` removes); server keeps
+  `data/avatars/<account>.png`, one change per 3 s, deleted with the account.
+  `Member.avatar` carries the hash; apps fetch `GET /avatars/<account>` only
+  for avatars drawn on screen, cache by hash in `%LOCALAPPDATA%\TUFFcord\avatars`,
+  initials otherwise. Older apps ignore it. Server HTTP plumbing moved from
+  `files.rs` into `http.rs`. Checked: `tests/test_files.py` (profile pictures
+  section), unit tests, all suites `--compat`, perf, Windows check. Not yet
+  seen on a real Windows screen.
+- To release: bump to 0.12.1, add to CHANGELOG: "You can set a profile
+  picture in Settings > Account; everyone sees it next to your name. The
+  server window's `invites` lists unused invites with their time left, and
+  `uninvite <n>` or `uninvite all` cancels them."
 
 ## Invite-only (0.12.0)
 - Group password removed: `auth.rs` register needs a valid invite; old apps

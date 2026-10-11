@@ -294,6 +294,10 @@ pub struct Member {
     pub name: String,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub admin: bool,
+    /// Their profile picture's hash (fetch `GET /avatars/<account>` when it
+    /// changes); none means initials. Servers before 0.12.1 leave it out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar: Option<String>,
 }
 
 /// Sent ahead of the image bytes in an upload frame.

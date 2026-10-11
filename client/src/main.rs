@@ -9,6 +9,7 @@ mod accounts;
 mod attach;
 mod attach_ui;
 mod autoscroll;
+mod avatars;
 mod channels_ui;
 mod chat;
 mod chat_text;
@@ -324,6 +325,8 @@ struct App {
     update_auto_started: bool,
     update_dismissed: Option<String>,
     att: Attachments,
+    /// Profile pictures (`avatars`).
+    avatars: avatars::Avatars,
     updater: Updater,
     update_failure_shown: Option<String>,
     emoji_open: bool,
@@ -419,6 +422,7 @@ impl App {
             update_auto_started: false,
             update_dismissed: None,
             att,
+            avatars: Default::default(),
             updater: Updater::default(),
             update_failure_shown: None,
             emoji_open: false,

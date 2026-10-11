@@ -204,9 +204,10 @@ impl App {
                                         pal().raised,
                                     );
                                 }
+                                let pic = self.avatars.pic(ui.ctx(), &r.name);
                                 let p = ui.painter();
                                 let c = rect.left_center() + egui::vec2(20.0, 0.0);
-                                paint_avatar(p, c, 14.0, &r.name, r.talking, bg);
+                                paint_avatar(p, c, 14.0, &r.name, pic, r.talking, bg);
                                 if !r.online {
                                     // Faded, like Discord's offline members.
                                     p.circle_filled(c, 15.0, theme::with_alpha(bg, 140));

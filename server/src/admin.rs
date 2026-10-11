@@ -174,6 +174,8 @@ pub fn act(
             }
             st.disconnect_account(target, "session_expired", "Your account was deleted.", None);
             st.accounts.delete(target);
+            let cfg = st.cfg.clone();
+            st.avatars.remove(&cfg, target);
             st.accounts.ensure_owner();
             st.save_accounts();
             admin_log!(st, "{by} deleted {name}'s account");

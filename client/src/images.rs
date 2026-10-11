@@ -135,7 +135,7 @@ pub fn prepare_file(path: &Path, max_bytes: u64) -> Result<Prepared, String> {
 
 /// Limits for decoding images other people sent: a tiny file can claim to be
 /// huge, and the decoder would set aside memory for all of it.
-fn received_limits() -> image::Limits {
+pub(crate) fn received_limits() -> image::Limits {
     let mut l = image::Limits::default();
     l.max_image_width = Some(8192);
     l.max_image_height = Some(8192);

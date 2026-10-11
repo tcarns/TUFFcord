@@ -53,6 +53,7 @@ impl State {
                 account: a.id,
                 name: a.name.clone(),
                 admin: a.admin,
+                avatar: self.avatars.hash(a.id),
             })
             .collect();
         list.sort_by_key(|m| m.name.to_lowercase());

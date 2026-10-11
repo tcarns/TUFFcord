@@ -101,6 +101,7 @@ impl App {
                         None => "none (the server is too old)".to_string(),
                     }
                 ));
+                self.avatars.reset(endpoint.clone(), &members);
                 self.att.endpoint = endpoint;
                 if max_attachment_bytes > 0 {
                     self.att.max_bytes = max_attachment_bytes;
@@ -266,6 +267,7 @@ impl App {
                 self.att.gone(&id);
             }
             ServerMsg::Members { list } => {
+                self.avatars.set_members(&list);
                 if let Some(sess) = self.session.as_mut() {
                     sess.members = list;
                 }

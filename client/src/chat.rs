@@ -174,6 +174,7 @@ impl App {
                             rect.center(),
                             19.0,
                             &first.author,
+                            self.avatars.pic(ui.ctx(), &first.author),
                             false,
                             pal().bg,
                         );

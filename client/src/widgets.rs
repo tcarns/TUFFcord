@@ -112,12 +112,14 @@ pub(crate) fn paint_trash(p: &egui::Painter, c: egui::Pos2, color: Color32) {
     p.line_segment([v(1.4, 0.2), v(1.2, 4.4)], s);
 }
 
-/// Round avatar with initials. Speaking adds the amber glow ring.
+/// Round avatar: their profile picture, else initials. Speaking adds the
+/// amber glow ring.
 pub(crate) fn paint_avatar(
     painter: &egui::Painter,
     center: egui::Pos2,
     radius: f32,
     name: &str,
+    pic: Option<egui::TextureId>,
     speaking: bool,
     ring_bg: Color32,
 ) {
@@ -125,6 +127,31 @@ pub(crate) fn paint_avatar(
         painter.circle_filled(center, radius + 6.0, theme::with_alpha(pal().accent, 46));
         painter.circle_filled(center, radius + 4.0, pal().accent);
         painter.circle_filled(center, radius + 2.0, ring_bg);
+    }
+    if let Some(tex) = pic {
+        // The picture on a circle: a fan of triangles from the middle.
+        let mut mesh = egui::Mesh::with_texture(tex);
+        let uv = |x: f32, y: f32| egui::pos2(0.5 + 0.5 * x, 0.5 + 0.5 * y);
+        mesh.vertices.push(egui::epaint::Vertex {
+            pos: center,
+            uv: uv(0.0, 0.0),
+            color: Color32::WHITE,
+        });
+        const STEPS: u32 = 32;
+        for i in 0..=STEPS {
+            let a = i as f32 / STEPS as f32 * std::f32::consts::TAU;
+            let (y, x) = a.sin_cos();
+            mesh.vertices.push(egui::epaint::Vertex {
+                pos: center + egui::vec2(x, y) * radius,
+                uv: uv(x, y),
+                color: Color32::WHITE,
+            });
+            if i > 0 {
+                mesh.add_triangle(0, i, i + 1);
+            }
+        }
+        painter.add(egui::Shape::mesh(mesh));
+        return;
     }
     painter.circle_filled(center, radius, avatar_color(name));
     painter.text(

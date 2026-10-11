@@ -3,6 +3,7 @@
 
 pub mod applog;
 pub mod audio;
+pub mod avatar;
 pub mod crash;
 pub mod emoji;
 pub mod files;

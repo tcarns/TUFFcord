@@ -44,8 +44,9 @@ time; hosting at home must keep working.
   voice relay, console commands; `history.rs` recent messages, archive of older
   ones (`data/history/*.jsonl`), `loadOlder`, deleting messages; `storage.rs`
   file storage limit, admins' storage warning; `auth.rs` sign-in; `admin.rs` admin
-  actions (owner rule); `limits.rs` wrong-password counts, hash and connection caps; `sessions.rs` signed-in devices, new-address notices; `adminlog.rs` admin log (`admin_log!`); `channels.rs` admins adding, renaming, deleting, reordering channels; `trash.rs` deleted text channels kept 30 days (`restore`); `console.rs` server window commands, and `TUFFcord-server <command>` to the running Linux server (`data/console.sock`); `invites.rs` console-only invites (24 h, 10 open); `accounts.rs` storage (argon2); `files.rs` HTTP endpoints on the same
-  port (POST/PUT/GET /files, Range, chunked bodies); `selfupdate.rs` watcher +
+  actions (owner rule); `limits.rs` wrong-password counts, hash and connection caps; `sessions.rs` signed-in devices, new-address notices; `adminlog.rs` admin log (`admin_log!`); `channels.rs` admins adding, renaming, deleting, reordering channels; `trash.rs` deleted text channels kept 30 days (`restore`); `console.rs` server window commands, and `TUFFcord-server <command>` to the running Linux server (`data/console.sock`); `invites.rs` console-only invites (24 h, 10 open); `accounts.rs` storage (argon2); `http.rs` plain HTTP on the same port
+  (reading requests, routing); `files.rs` file endpoints (POST/PUT/GET /files,
+  Range, chunked bodies); `avatars.rs` profile pictures (PUT/DELETE /avatar); `selfupdate.rs` watcher +
   updater; `config.rs` settings file and its upgrades; `log.rs`.
 - `client/src/` egui 0.32 (glow). The `App` struct is split across files,
   one `impl App` block per area:
@@ -60,12 +61,13 @@ time; hosting at home must keep working.
   - `accounts.rs` sign-in screen and account UI; `attach.rs` + `attach_ui.rs`
     attachments and players; `downloads.rs` cache downloads, preloading; `posters.rs` video
     preview frames (sender's, else taken locally); `autoscroll.rs` middle-click scroll;
-    `volume_ui.rs` speaker button and volume popup; `channels_ui.rs` channel admin (+, right-click menu, drag to reorder);
+    `volume_ui.rs` speaker button and volume popup; `avatars.rs` profile
+    pictures (on-screen fetch, Settings picker); `channels_ui.rs` channel admin (+, right-click menu, drag to reorder);
     `members.rs`; `security_ui.rs` devices, invites, admin log in Settings > Account; `chat_text.rs`; `theme.rs`; `history_ui.rs` loading older
     messages on scroll up, admins' storage bar.
   - Library (`lib.rs`, shared with `bin/bot.rs`, no UI): `media.rs` Media
     Foundation player (Windows only); `crash.rs`; `net.rs`, `voice.rs`,
-    `audio.rs` (cpal, opus); `files.rs` HTTP transfers; `settings.rs`,
+    `audio.rs` (cpal, opus); `files.rs` HTTP transfers; `avatar.rs` picture shrink, send, fetch; `settings.rs`,
     `applog.rs`, `updater.rs`, `emoji.rs`, `twemoji.rs`, `keys.rs`;
     `bin/bot.rs` headless test client (tones, `--send-file`).
 - `deploy/install.sh` sets up the server on a rented Ubuntu machine (systemd,

@@ -16,6 +16,10 @@ use serde::{Deserialize, Serialize};
 pub const CHUNK: u64 = 4 * 1024 * 1024;
 /// A poster (preview frame of a video) is a small JPEG.
 pub const MAX_POSTER: u64 = 512 * 1024;
+/// Profile pictures are PNGs exactly this many pixels square…
+pub const AVATAR_SIDE: u32 = 64;
+/// …and at most this big (`PUT /avatar`, fetched with `GET /avatars/<account>`).
+pub const MAX_AVATAR: usize = 16 * 1024;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]

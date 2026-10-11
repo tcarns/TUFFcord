@@ -20,7 +20,7 @@ pub struct Endpoint {
     pub key: String,
 }
 
-fn agent() -> ureq::Agent {
+pub(crate) fn agent() -> ureq::Agent {
     ureq::Agent::config_builder()
         .tls_config(
             ureq::tls::TlsConfig::builder()
@@ -40,12 +40,12 @@ fn agent() -> ureq::Agent {
         .into()
 }
 
-fn user_agent() -> String {
+pub(crate) fn user_agent() -> String {
     format!("TUFFcord/{}", proto::update::CURRENT)
 }
 
 /// Turn an error answer into a sentence (and log exactly what came back).
-fn explain(status: u16, body: &str) -> String {
+pub(crate) fn explain(status: u16, body: &str) -> String {
     let snippet: String = body.chars().take(300).collect();
     crate::applog::warn(format!("The server answered {status}: {snippet}"));
     match serde_json::from_str::<HttpError>(body) {

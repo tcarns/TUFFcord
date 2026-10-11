@@ -10,11 +10,13 @@ mod adminlog;
 mod accounts;
 mod admin;
 mod auth;
+mod avatars;
 mod channels;
 mod config;
 mod console;
 mod files;
 mod history;
+mod http;
 mod invites;
 mod limits;
 mod selfupdate;
@@ -81,6 +83,8 @@ struct State {
     failures: limits::Failures,
     /// Uploads in progress, file keys, storage use.
     files: files::Files,
+    /// Profile pictures' hashes.
+    avatars: avatars::Avatars,
     next_id: u32,
     next_voice_order: u64,
     started: Instant,
@@ -613,7 +617,7 @@ async fn handle_connection(mut stream: TcpStream, addr: SocketAddr, shared: Shar
         return;
     };
     let _ = stream.set_nodelay(true);
-    let (req, leftover) = match files::read_head(&mut stream).await {
+    let (req, leftover) = match http::read_head(&mut stream).await {
         Ok(r) => r,
         Err(e) => {
             trace!("conn", "Connection from {} ended early ({e})", addr.ip());
@@ -640,7 +644,7 @@ async fn handle_connection(mut stream: TcpStream, addr: SocketAddr, shared: Shar
 
     // Files go over plain HTTP; everything else is the app's WebSocket.
     if !req.is_websocket() {
-        files::handle(stream, req, leftover, ip, shared).await;
+        http::handle(stream, req, leftover, ip, shared).await;
         return;
     }
     {
@@ -1160,6 +1164,7 @@ async fn run(cfg: Arc<Config>) {
         accounts,
         failures: limits::Failures::default(),
         files: files::Files::new(stored),
+        avatars: avatars::Avatars::load(&cfg),
         next_id: 0,
         next_voice_order: 0,
         started: Instant::now(),
