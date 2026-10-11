@@ -2,9 +2,11 @@
 
 Where things stand. Rewrite (don't append) at the end of each working session.
 
-**Last updated:** 2026-10-11. **Released:** 0.11.1 (app and server), the first release the owner signed on his PC.
+**Last updated:** 2026-10-11. **Released:** 0.11.1. **0.11.2** pushed: draft waits for the owner's signature.
 
 ## Waiting on the owner
+- 0.11.2 (performance): sign the draft and run Publish release. Then he can
+  check Settings' memory figure idle and in a call (no Windows numbers yet).
 - Rented server deferred (2026-10-11): development continues against his home
   Windows server. When he's ready he follows `docs/hosting.md`; `install.sh`
   hasn't run on a real VPS yet.
@@ -13,6 +15,19 @@ Where things stand. Rewrite (don't append) at the end of each working session.
   Key `tuffcord-sign` is on his PC only; public half is `RELEASE_KEY` in
   `proto/src/update.rs`. The changeover job is removed and he deleted the
   old `release` environment and its key.
+
+## Performance (0.11.2)
+Review: `analysis/architecture-process-review.md` in the project files.
+- Done: redraw only on talking start/stop (UI thread in a call 7.6% to 0.5%
+  of a core with 300 messages), chat lays out only groups near the screen,
+  Linux server returns argon2 memory (64 MB to 7 MB with 8 in voice).
+  `tests/run.py perf` keeps budgets (CI runs it). Decision entry in
+  `docs/decisions.md`.
+- Under discussion with the owner: item 4, a UDP voice path before any
+  screen sharing (TCP stalls on packet loss; the home tunnel can't carry UDP).
+- Small, not started: Settings redraws every 60 ms while open (only the mic
+  meter needs it); `opt-level = "s"` for UI crates (~2 MB); text and voice
+  share the server's 512-slot send queue.
 
 ## Security pass (0.10.1 and 0.11.0)
 Report with every finding: `analysis/security-review.md` in the project files.

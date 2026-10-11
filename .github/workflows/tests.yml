@@ -30,3 +30,8 @@ jobs:
         run: |
           pip install --quiet --require-hashes -r tests/requirements.txt
           tests/run.py
+
+      - name: Memory and CPU budgets
+        run: |
+          sudo apt-get install -y xvfb xdotool libxkbcommon-x11-0 libgl1-mesa-dri libegl1
+          tests/run.py perf

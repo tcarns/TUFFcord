@@ -104,6 +104,9 @@ time; hosting at home must keep working.
 - End to end: `tests/run.py` (one line per suite; logs in `target/tests/`),
   `tests/run.py files delete`, `--compat` adds old/new version pairs (previous
   release built once into `target/compat/`), `-v` shows every check.
+- Memory/CPU budgets: `tests/run.py perf` (release build, Xvfb; numbers in
+  `target/tests/test_perf/perf.json`). Run after changes to redraws, chat
+  drawing, voice or server memory; CI runs it on every push.
 - Windows: `tools/windows.sh check` (fast) / `build`.
 - Wine UI: `tools/wine-ui.sh start <exe>`, `shot out.png 400x80+340+440`, `stop`.
 - Release: bump `version` in root `Cargo.toml`, add a `## x.y.z` section at the

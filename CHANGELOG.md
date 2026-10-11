@@ -2,6 +2,13 @@
 
 Each version's section becomes the notes on its GitHub release, which the app shows when an update is available.
 
+## 0.11.2
+
+Lighter on your computer and the server.
+
+- In a voice call the app now redraws only when someone starts or stops talking, instead of 8 times a second, and only lays out the messages near the screen. In our test that cut the app's work during a call from 7.6% of a CPU core to 0.5%, and it no longer grows as you scroll back through history.
+- The Linux server gives back the memory it uses to check passwords: with 8 people in a call it now uses about 7 MB instead of 64 MB.
+
 ## 0.11.1
 
 Security update.

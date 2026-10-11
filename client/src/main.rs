@@ -334,6 +334,8 @@ struct App {
     acct: accounts::AccountUi,
     /// Color emoji pictures (borrowed while drawing messages).
     emoji: RefCell<chat_text::EmojiCache>,
+    /// Message groups and their heights (borrowed while drawing messages).
+    chat_layout: RefCell<chat::ChatLayout>,
     /// The video or audio playing in the chat.
     player: Option<attach_ui::Playing>,
     /// "Open this program?" waiting for an answer.
@@ -426,6 +428,7 @@ impl App {
             emoji_opened_frame: 0,
             acct: accounts::AccountUi::default(),
             emoji: RefCell::new(chat_text::EmojiCache::default()),
+            chat_layout: RefCell::default(),
             player: None,
             confirm_open: None,
             confirm_delete: None,
@@ -830,7 +833,9 @@ impl eframe::App for App {
         if self.settings_open {
             ctx.request_repaint_after(Duration::from_millis(60));
         } else if someone_talking {
-            ctx.request_repaint_after(Duration::from_millis(120));
+            // Starting and stopping already wake the UI (mic callback, voice
+            // receiver); this only catches someone whose stop never arrived.
+            ctx.request_repaint_after(Duration::from_millis(1000));
         } else if let Some(t) = self.banner.as_ref().and_then(|b| b.until) {
             ctx.request_repaint_after(
                 t.saturating_duration_since(Instant::now()) + Duration::from_millis(20),

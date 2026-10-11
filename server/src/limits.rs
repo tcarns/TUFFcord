@@ -56,6 +56,18 @@ impl Drop for Slot {
     }
 }
 
+/// Each password hash borrows 19 MiB. glibc would keep those blocks in its
+/// heap after the first one is freed (it raises its mmap threshold), leaving
+/// the Linux server ~60 MB bigger for good after a few sign-ins. A fixed
+/// threshold hands them straight back. Windows already returns large blocks.
+pub fn return_hash_memory() {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    // SAFETY: mallopt only changes allocator settings; called once at start.
+    unsafe {
+        libc::mallopt(libc::M_MMAP_THRESHOLD, 128 * 1024);
+    }
+}
+
 pub async fn hash(pw: String) -> Option<String> {
     let _turn = HASHES.acquire().await.ok()?;
     tokio::task::spawn_blocking(move || accounts::hash_password(&pw))

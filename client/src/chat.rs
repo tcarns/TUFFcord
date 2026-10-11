@@ -110,11 +110,26 @@ impl App {
                 let deleting = self.is_admin() && ui.input(|inp| inp.modifiers.shift);
                 let row = ui.max_rect().x_range();
                 let mut delete_target: Option<(egui::Rect, &proto::ChatMessage)> = None;
-                let mut i = 0;
-                while i < msgs.len() {
+                let mut layout = self.chat_layout.borrow_mut();
+                layout.update(&self.current_text, msgs, ui.available_width());
+                // Groups well off screen are skipped once their height is known.
+                let clip = ui.clip_rect();
+                let near = clip.expand2(egui::vec2(0.0, clip.height()));
+                for b in layout.blocks.iter_mut() {
+                    let block_top = ui.cursor().top();
+                    let (i, j) = (b.start, b.end);
+                    if let Some(h) = b.height {
+                        let holds_anchor =
+                            anchor.is_some_and(|a| msgs[i..j].iter().any(|m| m.id == a));
+                        if !holds_anchor
+                            && (block_top + h < near.top() || block_top > near.bottom())
+                        {
+                            ui.add_space(h);
+                            continue;
+                        }
+                    }
                     let first = &msgs[i];
-                    let day = day_label(first.ts);
-                    if i == 0 || day_label(msgs[i - 1].ts) != day {
+                    if let Some(day) = &b.day {
                         ui.add_space(6.0);
                         ui.horizontal(|ui| {
                             ui.add_space(20.0);
@@ -146,16 +161,6 @@ impl App {
                             p.galley(rect.center() - galley.size() / 2.0, galley, pal().faint);
                         });
                         ui.add_space(6.0);
-                    }
-                    // Group consecutive messages from the same person within 5 minutes.
-                    let mut j = i + 1;
-                    while j < msgs.len()
-                        && msgs[j].author_id == first.author_id
-                        && msgs[j].author == first.author
-                        && msgs[j].ts.saturating_sub(msgs[j - 1].ts) < 5 * 60_000
-                        && day_label(msgs[j].ts) == day
-                    {
-                        j += 1;
                     }
                     let group_top = ui.cursor().top();
                     // Painted behind the first message (it covers the name row too).
@@ -243,7 +248,7 @@ impl App {
                         });
                     });
                     ui.add_space(10.0);
-                    i = j;
+                    b.height = Some(ui.cursor().top() - block_top);
                 }
                 // Drawn after every message so it sits on top and gets the click.
                 if let Some((area, m)) = delete_target {
@@ -382,5 +387,127 @@ impl App {
                     }
                 });
             });
+    }
+}
+
+/// The open channel's messages cut into groups (same person, within 5
+/// minutes, same day) with each group's height once drawn, so a frame lays out
+/// only what's near the screen and doesn't redo date labels for every message.
+#[derive(Default)]
+pub(crate) struct ChatLayout {
+    /// Channel, message count, first and last id, and today's date: any change
+    /// regroups (deletes, new and older messages, midnight's "Today").
+    key: (String, usize, String, String, Option<chrono::NaiveDate>),
+    /// Heights depend on the width (wrapping).
+    width: f32,
+    blocks: Vec<Block>,
+}
+
+struct Block {
+    start: usize,
+    end: usize,
+    /// Day divider shown above the group.
+    day: Option<String>,
+    height: Option<f32>,
+}
+
+impl ChatLayout {
+    fn update(&mut self, channel: &str, msgs: &[proto::ChatMessage], width: f32) {
+        let id = |m: Option<&proto::ChatMessage>| m.map(|m| m.id.clone()).unwrap_or_default();
+        let today = Some(chrono::Local::now().date_naive());
+        let same = self.key.0 == channel
+            && self.key.1 == msgs.len()
+            && self.key.2 == msgs.first().map_or("", |m| m.id.as_str())
+            && self.key.3 == msgs.last().map_or("", |m| m.id.as_str())
+            && self.key.4 == today;
+        if !same {
+            self.key = (
+                channel.to_string(),
+                msgs.len(),
+                id(msgs.first()),
+                id(msgs.last()),
+                today,
+            );
+            self.blocks = group(msgs);
+            self.width = width;
+        } else if (self.width - width).abs() > 0.5 {
+            self.width = width;
+            for b in &mut self.blocks {
+                b.height = None;
+            }
+        }
+    }
+}
+
+fn group(msgs: &[proto::ChatMessage]) -> Vec<Block> {
+    let days: Vec<String> = msgs.iter().map(|m| day_label(m.ts)).collect();
+    let mut blocks = Vec::new();
+    let mut i = 0;
+    while i < msgs.len() {
+        let first = &msgs[i];
+        let mut j = i + 1;
+        while j < msgs.len()
+            && msgs[j].author_id == first.author_id
+            && msgs[j].author == first.author
+            && msgs[j].ts.saturating_sub(msgs[j - 1].ts) < 5 * 60_000
+            && days[j] == days[i]
+        {
+            j += 1;
+        }
+        let day = (i == 0 || days[i - 1] != days[i]).then(|| days[i].clone());
+        blocks.push(Block {
+            start: i,
+            end: j,
+            day,
+            height: None,
+        });
+        i = j;
+    }
+    blocks
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn msg(id: &str, author: &str, ts: u64) -> proto::ChatMessage {
+        proto::ChatMessage {
+            id: id.into(),
+            channel: "general".into(),
+            author: author.into(),
+            author_id: author.into(),
+            text: "hi".into(),
+            ts,
+            attachments: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn groups_by_person_and_time() {
+        let t = 1_760_000_000_000;
+        let msgs = [
+            msg("a", "Ann", t),
+            msg("b", "Ann", t + 60_000),
+            msg("c", "Bob", t + 120_000),
+            msg("d", "Bob", t + 20 * 60_000),
+        ];
+        let b = group(&msgs);
+        let spans: Vec<_> = b.iter().map(|b| (b.start, b.end)).collect();
+        assert_eq!(spans, [(0, 2), (2, 3), (3, 4)]);
+        assert!(b[0].day.is_some() && b[1].day.is_none());
+    }
+
+    #[test]
+    fn width_change_forgets_heights_but_keeps_groups() {
+        let msgs = [msg("a", "Ann", 1_760_000_000_000)];
+        let mut l = ChatLayout::default();
+        l.update("general", &msgs, 500.0);
+        l.blocks[0].height = Some(40.0);
+        l.update("general", &msgs, 500.0);
+        assert_eq!(l.blocks[0].height, Some(40.0));
+        l.update("general", &msgs, 600.0);
+        assert_eq!(l.blocks[0].height, None);
+        l.update("links", &msgs, 600.0);
+        assert_eq!(l.blocks.len(), 1);
     }
 }

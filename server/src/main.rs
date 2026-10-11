@@ -1128,6 +1128,7 @@ fn main() {
     selfupdate::print_version_if_asked();
     // Double-clicked: become the watcher that runs (and restarts) the server.
     selfupdate::watch_unless_child();
+    limits::return_hash_memory();
     let restarted = selfupdate::restart_reason();
     let cfg = config::load();
     log::init(cfg.log_level, cfg.log_file.clone());

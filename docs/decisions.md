@@ -96,3 +96,14 @@ Settled choices and why. Add one when a choice would otherwise be revisited.
   the release, so an unsigned one never shows up. Deleted text channels go to
   `data/trash` for 30 days (`restore` in the server window). Review:
   `analysis/security-review-2.md` in the project files.
+- **Measured budgets for memory and CPU (0.11.2).** `tests/test_perf.py`
+  (`tests/run.py perf`, CI on every push) checks server memory idle and with
+  8 talking, the app's UI-thread CPU idle and in a call with 300 messages
+  (Linux build under Xvfb), and exe sizes. Found and fixed with it: the app
+  redrew every 120 ms while anyone talked (now only on start/stop, which
+  already wake the UI, plus a 1 s fallback); the chat laid out every message
+  each frame (now groups are cached with their heights and only those near the
+  screen are drawn, `chat::ChatLayout`); the Linux server kept ~58 MB of
+  argon2 memory because glibc raises its mmap threshold (fixed threshold at
+  start, `limits::return_hash_memory`; argon2 stays at 19 MiB). Review:
+  `analysis/architecture-process-review.md` in the project files.

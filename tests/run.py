@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Build the server and test bot, then run the end-to-end suites.
 
-  tests/run.py                 everything (except old/new version pairs)
+  tests/run.py                 everything (except old/new version pairs and perf)
+  tests/run.py perf            memory and CPU budgets (release build, Xvfb)
   tests/run.py files delete    just these suites (test_files.py, test_delete.py)
   tests/run.py --compat        also old app/new server and new app/old server,
                                against the previous release (built once, cached)
@@ -36,6 +37,13 @@ if "--compat" in flags:
 suites = sorted(glob.glob(os.path.join(HERE, "test_*.py")))
 if args:
     suites = [s for s in suites if os.path.basename(s)[5:-3] in args]
+else:  # perf needs release builds and a display; only when asked for
+    suites = [s for s in suites if not s.endswith("test_perf.py")]
+if any(s.endswith("test_perf.py") for s in suites) and "--no-build" not in flags:
+    r = subprocess.run(["cargo", "build", "--quiet", "--release", "-p", "tuffcord-server", "--bin", "TUFFcord-server",
+                        "-p", "tuffcord", "--bin", "tuffcord-bot", "--bin", "TUFFcord"], cwd=ROOT)
+    if r.returncode:
+        sys.exit("release build failed")
 failed = []
 for path in suites:
     name = os.path.basename(path)[5:-3]
