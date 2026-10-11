@@ -2,11 +2,11 @@
 
 Where things stand. Rewrite (don't append) at the end of each working session.
 
-**Last updated:** 2026-10-11. **Released:** 0.11.2 (signed). **Pushed, waiting for the owner to sign:** 0.12.0.
+**Last updated:** 2026-10-11. **Released:** 0.12.0 (signed, `release-check.sh` all OK).
 
 ## Waiting on the owner
-- Sign and publish 0.12.0 (`docs/releasing.md`), then check on his PC: the
-  server window's `invite` prints a code, Create account with it works, his
+- Check 0.12.0 on his PC (his server installs it a day after release, or type
+  `update`): the server window's `invite` prints a code, Create account with it works, his
   settings file no longer has `password`/`allow_signup` (the server takes them
   out on first start), and Settings > Account no longer has "Make an invite".
 
