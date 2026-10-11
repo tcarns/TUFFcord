@@ -60,15 +60,13 @@ YubiKey or similar), and every signature then needs a tap on the key.
 To throw a draft away (e.g. to rebuild it), delete it on the Releases page
 and push again or run the Release workflow by hand.
 
-## Changeover (0.11.1 only)
+## Changeover (done with 0.11.1)
 
-Copies up to 0.11.0 only accept the old raw signature made by the release
-workflow with `RELEASE_SIGNING_KEY` (GitHub environment `release`). So for
-0.11.1 the workflow's `old-sign` job still makes that signature (it waits for
-the Approve click as before, and sees nothing but `SHA256SUMS.txt`). After
-0.11.1 is out: delete the `old-sign` job and the `RELEASE_SIGNING_KEY`
-secret. Anyone still on 0.11.0 or older after that downloads the new version
-from the releases page once.
+Copies up to 0.11.0 only accept the old raw signature made by the workflow
+with `RELEASE_SIGNING_KEY` (GitHub environment `release`); 0.11.1 carried one
+for them. That job is gone; anyone still on 0.11.0 or older downloads the
+current version from the releases page once. The secret and the `release`
+environment are no longer used and can be deleted.
 
 ## A new key (lost or leaked)
 

@@ -136,64 +136,27 @@ jobs:
           path: dist/
           retention-days: 7
 
-  # CHANGEOVER (0.11.1 only, then delete this job and the RELEASE_SIGNING_KEY
-  # secret): copies up to 0.11.0 only accept the old raw signature made with
-  # the key in the "release" environment. It sees nothing but SHA256SUMS.txt.
-  old-sign:
-    needs: [check, build]
-    runs-on: ubuntu-24.04
-    environment: release
-    steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: dist
-          path: dist
-      - name: Fetch the key converter (only that file)
-        env:
-          SHA: ${{ github.sha }}
-        run: curl -fsSL -o "$RUNNER_TEMP/release-key.py" "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$SHA/tools/release-key.py"
-      - name: Sign the checksums (old format)
-        env:
-          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
-        run: |
-          set -o pipefail
-          umask 077
-          printf '%s\n' "$RELEASE_SIGNING_KEY" | python3 "$RUNNER_TEMP/release-key.py" > "$RUNNER_TEMP/key.pem"
-          openssl pkeyutl -sign -inkey "$RUNNER_TEMP/key.pem" -rawin -in dist/SHA256SUMS.txt -out "$RUNNER_TEMP/sig.bin"
-          rm -f "$RUNNER_TEMP/key.pem"
-          od -An -tx1 -v "$RUNNER_TEMP/sig.bin" | tr -d ' \n' > SHA256SUMS.txt.sig
-          echo >> SHA256SUMS.txt.sig
-          # The public half 0.11.0 carries.
-          pub=565816b56df7a234d2f6ff1eeaeee1fba5ab334d8f69dd813938b7b01329eebe
-          printf '302a300506032b6570032100%s' "$pub" | sed 's/../\\x&/g' | xargs -0 printf '%b' > "$RUNNER_TEMP/pub.der"
-          openssl pkeyutl -verify -pubin -keyform DER -inkey "$RUNNER_TEMP/pub.der" -rawin -in dist/SHA256SUMS.txt -sigfile "$RUNNER_TEMP/sig.bin"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: old-sig
-          path: SHA256SUMS.txt.sig
-          retention-days: 7
-
   # Uploads the files as a draft release. Only this job can write, and it runs
   # no project code.
   draft:
-    needs: [check, build, old-sign]
+    needs: [check, build]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          path: in
+          name: dist
+          path: in/dist
       - name: Create the draft release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.check.outputs.tag }}
         run: |
           cd in/dist
-          cp ../old-sig/SHA256SUMS.txt.sig .
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft \
             "TUFFcord-$TAG-windows.zip" TUFFcord.exe TUFFcord-server.exe backroom.exe backroom-server.exe \
-            TUFFcord-server-linux-x86_64 SHA256SUMS.txt SHA256SUMS.txt.sig \
+            TUFFcord-server-linux-x86_64 SHA256SUMS.txt \
             --target "$GITHUB_SHA" --title "TUFFcord ${TAG#v}" --notes-file notes.md
           {
             echo "### $TAG is drafted. To publish it:"

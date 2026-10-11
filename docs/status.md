@@ -2,7 +2,7 @@
 
 Where things stand. Rewrite (don't append) at the end of each working session.
 
-**Last updated:** 2026-10-11. **Released:** 0.11.0; 0.11.1 built as a draft, waiting for the owner's signature.
+**Last updated:** 2026-10-11. **Released:** 0.11.1 (app and server), the first release the owner signed on his PC.
 
 ## Waiting on the owner
 - Rented server deferred (2026-10-11): development continues against his home
@@ -11,11 +11,8 @@ Where things stand. Rewrite (don't append) at the end of each working session.
 - From 0.11.1 he signs every release on his PC (`ssh-keygen -Y sign`,
   passphrase) and runs the Publish release workflow (`docs/releasing.md`).
   Key `tuffcord-sign` is on his PC only; public half is `RELEASE_KEY` in
-  `proto/src/update.rs`. 0.11.1 also needs his Approve click once more
-  (changeover signature for 0.11.0 copies).
-- After 0.11.1 is published: delete the `old-sign` job from `release.yml`
-  (and make `draft` stop needing it) and ask him to delete the
-  `RELEASE_SIGNING_KEY` secret.
+  `proto/src/update.rs`. The changeover job is removed; asked him to delete
+  the unused `RELEASE_SIGNING_KEY` secret / `release` environment.
 
 ## Security pass (0.10.1 and 0.11.0)
 Report with every finding: `analysis/security-review.md` in the project files.
